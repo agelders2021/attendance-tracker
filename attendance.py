@@ -386,6 +386,9 @@ class TrainingTrackerApp:
             sessions = self.db.get_all_sessions()
             members = self.db.get_all_members()
             
+            # Defensive checks - ensure we have valid lists
+            if sessions is None or members is None:
+                return
             if not sessions or not members:
                 return
             
@@ -411,6 +414,10 @@ class TrainingTrackerApp:
                 'Other': PatternFill('solid', fgColor='90EE90'),     # Light green
             }
             
+            # Warning row styling (red background, white bold text)
+            warning_fill = PatternFill('solid', fgColor='FF0000')
+            warning_font = Font(bold=True, color='FFFFFF')
+            
             # Generate spreadsheet for each modified year
             for year in self._modified_years:
                 if year not in sessions_by_year:
@@ -432,10 +439,19 @@ class TrainingTrackerApp:
                 wb.remove(wb.active)
                 
                 # Sort months in chronological order (January first)
-                sorted_months = sorted(sessions_by_year[year].keys())
+                year_data = sessions_by_year.get(year)
+                if not year_data:
+                    continue
+                sorted_months = sorted(year_data.keys())
+                if not sorted_months:
+                    continue
                 
                 for month in sorted_months:
                     month_sessions = sessions_by_year[year][month]
+                    
+                    # Skip if no sessions for this month
+                    if not month_sessions:
+                        continue
                     
                     # Sort sessions within month by date (chronological - earlier dates on left)
                     month_sessions.sort(key=lambda s: s['_parsed_date'])
@@ -445,10 +461,23 @@ class TrainingTrackerApp:
                     
                     ws = wb.create_sheet(title=sheet_name)
                     
-                    # Header row - first column is "Member"
-                    ws.cell(row=1, column=1, value="Member")
-                    ws.cell(row=1, column=1).font = Font(bold=True)
-                    ws.cell(row=1, column=1).alignment = Alignment(horizontal='center')
+                    # Row 1: Warning header - spans across all columns
+                    warning_text = "***** Auto Generated -- Do not edit! *****"
+                    total_cols = len(month_sessions) + 1  # Member column + session columns
+                    
+                    warning_cell = ws.cell(row=1, column=1, value=warning_text)
+                    warning_cell.font = warning_font
+                    warning_cell.fill = warning_fill
+                    warning_cell.alignment = Alignment(horizontal='center')
+                    
+                    # Merge cells for warning row if there are multiple columns
+                    if total_cols > 1:
+                        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
+                    
+                    # Row 2: Header row - first column is "Member"
+                    ws.cell(row=2, column=1, value="Member")
+                    ws.cell(row=2, column=1).font = Font(bold=True)
+                    ws.cell(row=2, column=1).alignment = Alignment(horizontal='center')
                     
                     # Add session headers: {M/D} {location} - color coded by type
                     # Drop year since it's in the sheet title
@@ -460,7 +489,7 @@ class TrainingTrackerApp:
                         session_type = session.get('type', 'Weekend')
                         header_text = f"{date_short} {location}"
                         
-                        cell = ws.cell(row=1, column=col, value=header_text)
+                        cell = ws.cell(row=2, column=col, value=header_text)
                         cell.font = Font(bold=True)
                         cell.alignment = Alignment(horizontal='center')
                         
@@ -468,8 +497,8 @@ class TrainingTrackerApp:
                         if session_type in fills:
                             cell.fill = fills[session_type]
                     
-                    # Add member rows (NO coloring on data cells)
-                    for row, member in enumerate(members, start=2):
+                    # Add member rows (NO coloring on data cells) - starting at row 3
+                    for row, member in enumerate(members, start=3):
                         # Member name
                         name = f"{member.get('last_name', '')}, {member.get('first_name', '')}"
                         ws.cell(row=row, column=1, value=name)
@@ -487,7 +516,13 @@ class TrainingTrackerApp:
                     # Auto-adjust column widths
                     ws.column_dimensions['A'].width = 25
                     for col in range(2, len(month_sessions) + 2):
-                        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 18
+                        ws.column_dimensions[ws.cell(row=2, column=col).column_letter].width = 18
+                    
+                    # Protect the worksheet to make it read-only in Excel
+                    # Users can view but cannot edit without unprotecting
+                    # No password set - just a visual deterrent
+                    ws.protection.sheet = True
+                    ws.protection.enable()
                 
                 # Save workbook
                 wb.save(filepath)
@@ -543,6 +578,16 @@ class TrainingTrackerApp:
                 return
             
             members = self.db.get_all_members()
+            
+            # Look up the sender's member name based on their email
+            sender_member_name = "Secretary"  # Default fallback
+            for m in members:
+                if m.get('email', '').strip().lower() == sender_email.strip().lower():
+                    sender_member_name = f"{m.get('first_name', '')} {m.get('last_name', '')}".strip()
+                    break
+                elif m.get('alternate_email', '').strip().lower() == sender_email.strip().lower():
+                    sender_member_name = f"{m.get('first_name', '')} {m.get('last_name', '')}".strip()
+                    break
             
             # Get sessions from last 6 months (for weekend attendance count)
             cutoff_6mo = datetime.now() - timedelta(days=180)
@@ -659,10 +704,16 @@ class TrainingTrackerApp:
                         msg = MIMEMultipart()
                         msg['From'] = sender_email
                         msg['To'] = email
-                        msg['Subject'] = "Your Training Attendance Record"
+                        msg['Subject'] = "505 SAR Dogs Attendance Record"
                         
                         # Email body
-                        body = f"Dear {member_name},\n\nPlease find attached your training attendance record for the last 3 months.\n\nContact the Training Officer if you think there is an error.\n\nBest regards"
+                        body = (
+                            f"Dear {member_name},\n\n"
+                            f"Please find attached your training attendance record for the last 3 months.\n\n"
+                            f"Contact me (Secretary) by replying to this email if you think there is an error.\n\n"
+                            f"Thank you,\n"
+                            f"{sender_member_name}"
+                        )
                         msg.attach(MIMEText(body, 'plain'))
                         
                         # Attach PDF
@@ -770,7 +821,7 @@ class TrainingTrackerApp:
             story.append(Spacer(1, 12))
             
             # Preface
-            preface = "Recorded sessions over the last three months. Contact the Training Officer if you think there is an error."
+            preface = "Recorded sessions over the last three months."
             story.append(Paragraph(preface, styles['Normal']))
             story.append(Spacer(1, 20))
             
@@ -2753,13 +2804,28 @@ class TrainingTrackerApp:
         success, message = self.db.delete_session(session_id)
         
         if success:
+            # Track the year as modified for Excel export
+            if date_str:
+                try:
+                    session_date = datetime.strptime(date_str, "%m/%d/%Y")
+                    self._modified_years.add(session_date.year)
+                except ValueError:
+                    pass
+            
             self.vars.clear_training_session()
             self.ui_state.current_session_attendance = {}
+            self.ui_state.is_editing_session = False
             self._on_session_type_changed()
             
             # Clear the datepicker if using tkcalendar
             if ui_support.TKCALENDAR_AVAILABLE and self.date_entry:
                 self.date_entry.delete(0, tk.END)
+            
+            # Mark session as clean (no unsaved changes)
+            self.ui_state.mark_session_clean()
+            
+            # Update attendance section state (disabled since no date)
+            self._update_attendance_section_state()
             
             # Refresh session lists
             self.ui_state.sessions_list = self.db.get_all_sessions()

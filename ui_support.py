@@ -460,23 +460,36 @@ class UIState:
         Returns:
             True if data has changed, False otherwise
         """
-        # If no saved state and form is essentially empty, no changes
+        # Get the meaningful field values
+        location = current_data.get('location', '').strip()
+        date = current_data.get('date', '').strip()
+        description = current_data.get('description', '').strip()
+        session_type = current_data.get('type', 'Weekend')
+        
+        # If no saved state, check if form has meaningful content
         if not self.last_saved_session_data:
-            # Check if any meaningful fields have values (ignore type which has a default)
-            location = current_data.get('location', '').strip()
-            date = current_data.get('date', '').strip()
-            description = current_data.get('description', '').strip()
-            
-            # Only consider it changed if location or date has a value
-            if location or date:
+            # Only consider it changed if BOTH location AND date have values
+            # This prevents false positives when form is essentially empty
+            if location and date:
                 return True
             return False
             
         # Compare with saved state
-        for key, value in current_data.items():
-            saved_value = self.last_saved_session_data.get(key, "")
-            if str(value).strip() != str(saved_value).strip():
-                return True
+        saved_location = self.last_saved_session_data.get('location', '').strip()
+        saved_date = self.last_saved_session_data.get('date', '').strip()
+        saved_description = self.last_saved_session_data.get('description', '').strip()
+        saved_type = self.last_saved_session_data.get('type', 'Weekend')
+        
+        # Check each field for changes
+        if location != saved_location:
+            return True
+        if date != saved_date:
+            return True
+        if description != saved_description:
+            return True
+        if session_type != saved_type:
+            return True
+            
         return False
 
 
