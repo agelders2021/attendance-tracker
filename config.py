@@ -33,6 +33,14 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
 
+# Import password manager for secure password encryption
+try:
+    import password_manager
+    PASSWORD_MANAGER_AVAILABLE = True
+except ImportError:
+    PASSWORD_MANAGER_AVAILABLE = False
+    print("WARNING: password_manager module not found. Password encryption disabled.")
+
 
 # Default configuration values
 DEFAULT_CONFIG = {
@@ -51,44 +59,39 @@ DEFAULT_CONFIG = {
     "smtp_encryption": "TLS",  # TLS, SSL, or None
 }
 
-# Simple XOR encryption key (not highly secure, but obfuscates the password)
-_ENCRYPTION_KEY = b'Tr41n1ngTr4ck3r2024!'
 
 def _encrypt_password(password: str) -> str:
-    """Encrypt a password using XOR with base64 encoding.
+    """Encrypt a password using password_manager.
     
     Args:
         password: Plain text password
         
     Returns:
-        Base64 encoded encrypted password
+        Encrypted password string
     """
     if not password:
         return ""
-    import base64
-    key = _ENCRYPTION_KEY
-    encrypted = bytes([ord(c) ^ key[i % len(key)] for i, c in enumerate(password)])
-    return base64.b64encode(encrypted).decode('utf-8')
+    if PASSWORD_MANAGER_AVAILABLE:
+        encrypted = password_manager.encrypt_password(password)
+        return encrypted if encrypted else ""
+    return ""
+
 
 def _decrypt_password(encrypted: str) -> str:
-    """Decrypt a password that was encrypted with _encrypt_password.
+    """Decrypt a password using password_manager.
     
     Args:
-        encrypted: Base64 encoded encrypted password
+        encrypted: Encrypted password string
         
     Returns:
         Plain text password
     """
     if not encrypted:
         return ""
-    import base64
-    try:
-        key = _ENCRYPTION_KEY
-        decoded = base64.b64decode(encrypted.encode('utf-8'))
-        decrypted = ''.join([chr(b ^ key[i % len(key)]) for i, b in enumerate(decoded)])
-        return decrypted
-    except Exception:
-        return ""
+    if PASSWORD_MANAGER_AVAILABLE:
+        decrypted = password_manager.decrypt_password(encrypted)
+        return decrypted if decrypted else ""
+    return ""
 
 
 def get_config_path() -> str:

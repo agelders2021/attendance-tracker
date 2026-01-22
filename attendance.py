@@ -119,21 +119,12 @@ class TrainingTrackerApp:
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
         
     def _on_tab_changed(self, event):
-        """Handle tab change event - check for unsaved session changes.
+        """Handle tab change event.
         
         Args:
             event: The tkinter event
         """
         new_tab_index = self.notebook.index(self.notebook.select())
-        
-        # If leaving Training Sessions tab (index 2), check for unsaved changes
-        if self.current_tab_index == 2 and new_tab_index != 2:
-            if self._check_unsaved_session_changes():
-                if not self._prompt_save_session():
-                    # User cancelled, stay on current tab
-                    self.notebook.select(self.current_tab_index)
-                    return
-                    
         self.current_tab_index = new_tab_index
         
     def _get_current_session_data(self) -> dict:
@@ -148,39 +139,6 @@ class TrainingTrackerApp:
             'type': self.vars.session_type.get(),
             'description': self.vars.session_description.get(),
         }
-        
-    def _check_unsaved_session_changes(self) -> bool:
-        """Check if session has unsaved changes.
-        
-        Returns:
-            True if there are unsaved changes, False otherwise
-        """
-        current_data = self._get_current_session_data()
-        return self.ui_state.check_session_changed(current_data)
-        
-    def _prompt_save_session(self) -> bool:
-        """Prompt user to save unsaved session changes.
-        
-        Returns:
-            True if user saved or discarded, False if user cancelled
-        """
-        response = messagebox.askyesnocancel(
-            "Unsaved Changes",
-            "You have unsaved changes to the training session.\n\n"
-            "Do you want to save before continuing?"
-        )
-        
-        if response is None:
-            # User clicked Cancel
-            return False
-        elif response:
-            # User clicked Yes - save the session
-            self._on_save_session()
-            return True
-        else:
-            # User clicked No - discard changes
-            self.ui_state.mark_session_clean()
-            return True
         
     def _load_config_and_initialize(self):
         """Load configuration from file and initialize database if path exists."""
@@ -264,22 +222,7 @@ class TrainingTrackerApp:
                 self._restore_from_backup_file(backup_path)
                 
     def _on_closing(self):
-        """Handle window closing - check for unsaved changes, create backup, and save configuration."""
-        # Check for unsaved session changes
-        if self._check_unsaved_session_changes():
-            response = messagebox.askyesnocancel(
-                "Unsaved Changes",
-                "You have unsaved changes to the training session.\n\n"
-                "Do you want to save before exiting?"
-            )
-            
-            if response is None:
-                # User clicked Cancel - don't close
-                return
-            elif response:
-                # User clicked Yes - save the session
-                self._on_save_session()
-        
+        """Handle window closing - create backup and save configuration."""
         # Create backup if database exists and backup folder is set
         backup_folder = self.vars.secondary_backup_folder.get()
         if self.db.database_exists() and backup_folder:
@@ -708,7 +651,8 @@ class TrainingTrackerApp:
                         
                         # Email body
                         body = (
-                            f"Dear {member_name},\n\n"
+                            f"To: {member_name},\n"
+                            f"Re: Training\n\n"
                             f"Please find attached your training attendance record for the last 3 months.\n\n"
                             f"Contact me (Secretary) by replying to this email if you think there is an error.\n\n"
                             f"Thank you,\n"
@@ -1998,7 +1942,6 @@ class TrainingTrackerApp:
         frame.pack(fill=tk.X, padx=5, pady=5)
         
         ttk.Button(frame, text="New Session", command=self._on_new_session).pack(side=tk.LEFT, padx=5)
-        ttk.Button(frame, text="Save Session", command=self._on_save_session).pack(side=tk.LEFT, padx=5)
         ttk.Button(frame, text="Delete Session", command=self._on_delete_session).pack(side=tk.LEFT, padx=5)
         ttk.Button(frame, text="Clear Form", command=self._on_clear_session).pack(side=tk.LEFT, padx=5)
         
@@ -2645,14 +2588,8 @@ class TrainingTrackerApp:
     
     def _on_new_session(self):
         """Handle New Session button click."""
-        # Check for unsaved changes first
-        if self._check_unsaved_session_changes():
-            if not self._prompt_save_session():
-                return  # User cancelled
-        
         if not messagebox.askyesno("New Session", 
-                                   "Clear form for new session entry?\n"
-                                   "Any unsaved changes will be lost."):
+                                   "Clear form for new session entry?"):
             return
             
         self.vars.clear_training_session()
@@ -2836,14 +2773,8 @@ class TrainingTrackerApp:
             
     def _on_clear_session(self):
         """Handle Clear Form button click."""
-        # Check for unsaved changes first
-        if self._check_unsaved_session_changes():
-            if not self._prompt_save_session():
-                return  # User cancelled
-        
         if not messagebox.askyesno("Clear Form", 
-                                   "Clear all form fields?\n"
-                                   "Any unsaved changes will be lost."):
+                                   "Clear all form fields?"):
             return
             
         self.vars.clear_training_session()
@@ -2864,6 +2795,8 @@ class TrainingTrackerApp:
     def _on_attendance_double_click(self, event):
         """Handle double-click on attendance treeview to toggle yes/no.
         
+        Auto-saves the session if not already saved.
+        
         Args:
             event: The tkinter event
         """
@@ -2877,7 +2810,31 @@ class TrainingTrackerApp:
         
         if not item or column != "#2":  # Only allow toggling the attended column
             return
+        
+        if not self.db.database_exists():
+            messagebox.showwarning("Database Required", 
+                                   "Please initialize the database first (Setup tab).")
+            return
             
+        # Check if we need to save the session first
+        session_id = self.vars.selected_session_id.get()
+        
+        if session_id < 0:
+            # Session not saved yet - check if we have required fields
+            location = self.vars.session_location.get().strip()
+            date_str = self.vars.session_date.get().strip()
+            
+            if not location or not date_str:
+                messagebox.showwarning("Session Required", 
+                                       "Please enter a Location and Date before marking attendance.")
+                return
+            
+            # Auto-save the session
+            session_id = self._auto_save_session()
+            if session_id < 0:
+                # Save failed
+                return
+        
         # Toggle the value
         values = list(self.attendance_tree.item(item, "values"))
         current_attendance = values[1]
@@ -2885,29 +2842,90 @@ class TrainingTrackerApp:
         values[1] = new_attendance
         self.attendance_tree.item(item, values=values)
         
-        # Update database immediately if session is saved
-        session_id = self.vars.selected_session_id.get()
-        if session_id > 0 and self.db.database_exists():
+        # Update database
+        try:
+            member_id = int(item.replace("member_", ""))
+            attended = new_attendance == "Yes"
+            self.db.update_attendance(session_id, member_id, attended)
+            
+            # Track the year as modified for Excel export
+            date_str = self.vars.session_date.get()
+            if date_str:
+                try:
+                    session_date = datetime.strptime(date_str, "%m/%d/%Y")
+                    self._modified_years.add(session_date.year)
+                except ValueError:
+                    pass
+            
+            # Update weekend count display
+            weekend_count = self.db.get_weekend_attendance_count(member_id)
+            values[2] = str(weekend_count)
+            self.attendance_tree.item(item, values=values)
+        except ValueError:
+            pass
+            
+    def _auto_save_session(self) -> int:
+        """Auto-save the current session to database.
+        
+        Returns:
+            Session ID if successful, -1 if failed
+        """
+        # Get and validate form data
+        location = self.vars.session_location.get().strip().title()
+        date_str = self.vars.session_date.get().strip()
+        session_type = self.vars.session_type.get()
+        description = self.vars.session_description.get().strip()
+        
+        # Validate date
+        is_valid, result = ui_support.validate_date(date_str)
+        if not is_valid:
+            messagebox.showerror("Invalid Date", result)
+            return -1
+        date_str = result
+        
+        # Update UI with normalized values
+        self.vars.session_location.set(location)
+        self.vars.session_date.set(date_str)
+        
+        # Auto-add new location to training locations list
+        existing_locations = self.db.get_training_locations()
+        if location and location not in existing_locations:
+            self.db.add_training_location(location)
+            self._refresh_locations_listbox()
+        
+        # Prepare session data
+        session_data = {
+            'id': self.vars.selected_session_id.get(),
+            'location': location,
+            'date': date_str,
+            'type': session_type,
+            'description': description,
+        }
+        
+        # Save to database
+        success, session_id, message = self.db.save_session(session_data)
+        
+        if success:
+            self.vars.selected_session_id.set(session_id)
+            
+            # Track the year as modified for Excel export
             try:
-                member_id = int(item.replace("member_", ""))
-                attended = new_attendance == "Yes"
-                self.db.update_attendance(session_id, member_id, attended)
-                
-                # Track the year as modified for Excel export
-                date_str = self.vars.session_date.get()
-                if date_str:
-                    try:
-                        session_date = datetime.strptime(date_str, "%m/%d/%Y")
-                        self._modified_years.add(session_date.year)
-                    except ValueError:
-                        pass
-                
-                # Update weekend count display
-                weekend_count = self.db.get_weekend_attendance_count(member_id)
-                values[2] = str(weekend_count)
-                self.attendance_tree.item(item, values=values)
+                session_date = datetime.strptime(date_str, "%m/%d/%Y")
+                self._modified_years.add(session_date.year)
             except ValueError:
                 pass
+            
+            # Refresh session lists
+            self.ui_state.sessions_list = self.db.get_all_sessions()
+            self.refresh_location_combobox()
+            
+            # Mark session as saved
+            self.ui_state.mark_session_saved(self._get_current_session_data())
+            
+            return session_id
+        else:
+            messagebox.showerror("Save Error", message)
+            return -1
         
     def _reset_attendance_list(self):
         """Reset the attendance list to default (all No)."""
