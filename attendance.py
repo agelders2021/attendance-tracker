@@ -80,6 +80,9 @@ class TrainingTrackerApp:
         # Flag to prevent duplicate name warning while loading member data
         self._loading_member_data = False
         
+        # Track which years have had attendance data modified during this session
+        self._modified_years: set = set()
+        
         # Create the main notebook (tab container)
         self._create_notebook()
         
@@ -364,61 +367,41 @@ class TrainingTrackerApp:
         self.config.save()
         
     def _generate_participation_excel(self, excel_folder: str):
-        """Generate the Participation-{year}.xlsx file on exit with monthly sheets.
+        """Generate Participation-{year}.xlsx files for modified years only.
         
         Args:
             excel_folder: Path to the Excel output folder
         """
+        # Only generate for years that were modified during this session
+        if not self._modified_years:
+            return
+            
         try:
             from openpyxl import Workbook
             from openpyxl.styles import Font, PatternFill, Alignment
             from collections import defaultdict
             import calendar
             
-            current_year = datetime.now().year
-            filename = f"Participation-{current_year}.xlsx"
-            filepath = os.path.join(excel_folder, filename)
-            backup_path = os.path.join(excel_folder, f"Participation-{current_year}-back.xlsx")
-            
-            # Move current file to backup if it exists
-            if os.path.exists(filepath):
-                if os.path.exists(backup_path):
-                    os.remove(backup_path)
-                os.rename(filepath, backup_path)
-            
             # Get all sessions and members
             sessions = self.db.get_all_sessions()
             members = self.db.get_all_members()
             
-            # DEBUG: Print session data to verify field names
-            # print(f"DEBUG: Excel - Found {len(sessions)} sessions, {len(members)} members")
-            # if sessions:
-            #     print(f"DEBUG: Excel - First session keys: {sessions[0].keys()}")
-            #     print(f"DEBUG: Excel - First session data: {sessions[0]}")
-            
             if not sessions or not members:
                 return
             
-            # Group sessions by month-year
-            sessions_by_month = defaultdict(list)
+            # Group sessions by year, then by month
+            sessions_by_year = defaultdict(lambda: defaultdict(list))
             for session in sessions:
                 date_str = session.get('date', '')
                 try:
                     session_date = datetime.strptime(date_str, "%m/%d/%Y")
-                    month_key = (session_date.year, session_date.month)
-                    sessions_by_month[month_key].append(session)
+                    year = session_date.year
+                    month = session_date.month
+                    # Store session with parsed date for sorting
+                    session['_parsed_date'] = session_date
+                    sessions_by_year[year][month].append(session)
                 except ValueError:
                     continue
-            
-            # DEBUG: Print grouping results
-            # print(f"DEBUG: Excel - Sessions grouped into {len(sessions_by_month)} months")
-            # for key, sess_list in sessions_by_month.items():
-            #     print(f"DEBUG: Excel - {key}: {len(sess_list)} sessions")
-            
-            # Create workbook
-            wb = Workbook()
-            # Remove default sheet
-            wb.remove(wb.active)
             
             # Define fill colors for session types (header cells only)
             fills = {
@@ -428,71 +411,88 @@ class TrainingTrackerApp:
                 'Other': PatternFill('solid', fgColor='90EE90'),     # Light green
             }
             
-            # Sort months in chronological order
-            sorted_months = sorted(sessions_by_month.keys())
-            
-            for year, month in sorted_months:
-                month_sessions = sessions_by_month[(year, month)]
-                month_name = calendar.month_name[month]
-                sheet_name = f"{month_name}-{year}"
-                
-                # DEBUG: Print sheet creation
-                # print(f"DEBUG: Excel - Creating sheet: {sheet_name} with {len(month_sessions)} sessions")
-                
-                ws = wb.create_sheet(title=sheet_name)
-                
-                # Header row - first column is "Member"
-                ws.cell(row=1, column=1, value="Member")
-                ws.cell(row=1, column=1).font = Font(bold=True)
-                ws.cell(row=1, column=1).alignment = Alignment(horizontal='center')
-                
-                # Add session headers: {date} {location} - color coded by type
-                for col, session in enumerate(month_sessions, start=2):
-                    date_str = session.get('date', '')
-                    location = session.get('location', '')
-                    session_type = session.get('type', 'Weekend')
-                    header_text = f"{date_str} {location}"
+            # Generate spreadsheet for each modified year
+            for year in self._modified_years:
+                if year not in sessions_by_year:
+                    continue
                     
-                    # DEBUG: Print each header
-                    # print(f"DEBUG: Excel - Col {col}: date='{date_str}', loc='{location}', type='{session_type}'")
-                    
-                    cell = ws.cell(row=1, column=col, value=header_text)
-                    cell.font = Font(bold=True)
-                    cell.alignment = Alignment(horizontal='center')
-                    
-                    # Apply color to HEADER ONLY based on session type
-                    if session_type in fills:
-                        cell.fill = fills[session_type]
+                filename = f"Participation-{year}.xlsx"
+                filepath = os.path.join(excel_folder, filename)
+                backup_path = os.path.join(excel_folder, f"Participation-{year}-back.xlsx")
                 
-                # Add member rows (NO coloring on data cells)
-                for row, member in enumerate(members, start=2):
-                    # Member name
-                    name = f"{member.get('last_name', '')}, {member.get('first_name', '')}"
-                    ws.cell(row=row, column=1, value=name)
+                # Move current file to backup if it exists
+                if os.path.exists(filepath):
+                    if os.path.exists(backup_path):
+                        os.remove(backup_path)
+                    os.rename(filepath, backup_path)
+                
+                # Create workbook
+                wb = Workbook()
+                # Remove default sheet
+                wb.remove(wb.active)
+                
+                # Sort months in chronological order (January first)
+                sorted_months = sorted(sessions_by_year[year].keys())
+                
+                for month in sorted_months:
+                    month_sessions = sessions_by_year[year][month]
                     
-                    # Attendance for each session
-                    member_id = member.get('id')
+                    # Sort sessions within month by date (chronological - earlier dates on left)
+                    month_sessions.sort(key=lambda s: s['_parsed_date'])
+                    
+                    month_name = calendar.month_name[month]
+                    sheet_name = f"{month_name}-{year}"
+                    
+                    ws = wb.create_sheet(title=sheet_name)
+                    
+                    # Header row - first column is "Member"
+                    ws.cell(row=1, column=1, value="Member")
+                    ws.cell(row=1, column=1).font = Font(bold=True)
+                    ws.cell(row=1, column=1).alignment = Alignment(horizontal='center')
+                    
+                    # Add session headers: {M/D} {location} - color coded by type
+                    # Drop year since it's in the sheet title
                     for col, session in enumerate(month_sessions, start=2):
-                        session_id = session.get('id')
+                        parsed_date = session['_parsed_date']
+                        # Format as M/D (no year, no leading zeros)
+                        date_short = f"{parsed_date.month}/{parsed_date.day}"
+                        location = session.get('location', '')
+                        session_type = session.get('type', 'Weekend')
+                        header_text = f"{date_short} {location}"
                         
-                        # Get attendance status
-                        attended = self.db.get_attendance_status(session_id, member_id)
-                        cell = ws.cell(row=row, column=col, value="Yes" if attended else "No")
+                        cell = ws.cell(row=1, column=col, value=header_text)
+                        cell.font = Font(bold=True)
                         cell.alignment = Alignment(horizontal='center')
+                        
+                        # Apply color to HEADER ONLY based on session type
+                        if session_type in fills:
+                            cell.fill = fills[session_type]
+                    
+                    # Add member rows (NO coloring on data cells)
+                    for row, member in enumerate(members, start=2):
+                        # Member name
+                        name = f"{member.get('last_name', '')}, {member.get('first_name', '')}"
+                        ws.cell(row=row, column=1, value=name)
+                        
+                        # Attendance for each session
+                        member_id = member.get('id')
+                        for col, session in enumerate(month_sessions, start=2):
+                            session_id = session.get('id')
+                            
+                            # Get attendance status
+                            attended = self.db.get_attendance_status(session_id, member_id)
+                            cell = ws.cell(row=row, column=col, value="Yes" if attended else "No")
+                            cell.alignment = Alignment(horizontal='center')
+                    
+                    # Auto-adjust column widths
+                    ws.column_dimensions['A'].width = 25
+                    for col in range(2, len(month_sessions) + 2):
+                        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 18
                 
-                # Auto-adjust column widths
-                ws.column_dimensions['A'].width = 25
-                for col in range(2, len(month_sessions) + 2):
-                    ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 20
-            
-            # Save workbook
-            wb.save(filepath)
-            # DEBUG: Print save confirmation
-            # print(f"DEBUG: Excel - Participation Excel saved: {filepath}")
+                # Save workbook
+                wb.save(filepath)
             
         except ImportError:
-            # DEBUG: Print import error
-            # print("DEBUG: Excel - openpyxl not installed - Excel export skipped")
             pass
         except Exception as e:
             print(f"Error generating Excel: {e}")
@@ -662,7 +662,7 @@ class TrainingTrackerApp:
                         msg['Subject'] = "Your Training Attendance Record"
                         
                         # Email body
-                        body = f"Dear {member_name},\n\nPlease find attached your training attendance record for the last 6 months.\n\nContact the Training Officer if you think there is an error.\n\nBest regards"
+                        body = f"Dear {member_name},\n\nPlease find attached your training attendance record for the last 3 months.\n\nContact the Training Officer if you think there is an error.\n\nBest regards"
                         msg.attach(MIMEText(body, 'plain'))
                         
                         # Attach PDF
@@ -766,7 +766,7 @@ class TrainingTrackerApp:
             story = []
             
             # Title
-            story.append(Paragraph(f"Attendance Record for {member_name}", styles['Title']))
+            story.append(Paragraph(f"505 SAR Dogs Attendance Record for {member_name}", styles['Title']))
             story.append(Spacer(1, 12))
             
             # Preface
@@ -1323,11 +1323,14 @@ class TrainingTrackerApp:
         
     def _on_add_location(self):
         """Handle Add Location button click."""
-        location = self.new_location_var.get().strip()
+        location = self.new_location_var.get().strip().title()
         
         if not location:
             messagebox.showwarning("Add Location", "Please enter a location name.")
             return
+        
+        # Update the entry field to show title case
+        self.new_location_var.set(location)
             
         if not self.db.database_exists():
             messagebox.showwarning("Add Location", 
@@ -2153,22 +2156,27 @@ class TrainingTrackerApp:
                                    "Please initialize the database first (Setup tab).")
             return
             
-        # Prepare full member data
+        # Prepare full member data (title case for names)
         member_data = {
             'id': self.vars.selected_member_id.get(),
-            'first_name': self.vars.first_name.get().strip(),
-            'last_name': self.vars.last_name.get().strip(),
+            'first_name': self.vars.first_name.get().strip().title(),
+            'last_name': self.vars.last_name.get().strip().title(),
             'address': self.vars.address.get().strip(),
             'cell_phone': self.vars.cell_phone.get().strip(),
             'home_phone': self.vars.home_phone.get().strip(),
             'email': self.vars.email.get().strip(),
             'alternate_email': self.vars.alternate_email.get().strip(),
-            'emergency_contact_name': self.vars.emergency_contact_name.get().strip(),
+            'emergency_contact_name': self.vars.emergency_contact_name.get().strip().title(),
             'emergency_contact_phone': self.vars.emergency_contact_phone.get().strip(),
             'ham_callsign': self.vars.ham_callsign.get().strip(),
             'mission_eligible': self.vars.mission_eligible.get(),
             'certifications': self._get_certifications_from_tree(),
         }
+        
+        # Update the UI fields to show the title case
+        self.vars.first_name.set(member_data['first_name'])
+        self.vars.last_name.set(member_data['last_name'])
+        self.vars.emergency_contact_name.set(member_data['emergency_contact_name'])
         
         # Save to database
         success, member_id, message = self.db.save_member(member_data)
@@ -2642,8 +2650,12 @@ class TrainingTrackerApp:
                                       "Continue saving without a description?"):
                 return
         
-        # Auto-add new location to training locations list
-        location = self.vars.session_location.get().strip()
+        # Auto-add new location to training locations list (with title case)
+        location = self.vars.session_location.get().strip().title()
+        
+        # Update the UI field to show the title case
+        self.vars.session_location.set(location)
+        
         existing_locations = self.db.get_training_locations()
         if location and location not in existing_locations:
             self.db.add_training_location(location)
@@ -2666,6 +2678,15 @@ class TrainingTrackerApp:
             
             # Save attendance records
             self._save_current_attendance(session_id)
+            
+            # Track the year as modified for Excel export
+            date_str = self.vars.session_date.get()
+            if date_str:
+                try:
+                    session_date = datetime.strptime(date_str, "%m/%d/%Y")
+                    self._modified_years.add(session_date.year)
+                except ValueError:
+                    pass
             
             # Refresh session lists
             self.ui_state.sessions_list = self.db.get_all_sessions()
@@ -2805,6 +2826,15 @@ class TrainingTrackerApp:
                 member_id = int(item.replace("member_", ""))
                 attended = new_attendance == "Yes"
                 self.db.update_attendance(session_id, member_id, attended)
+                
+                # Track the year as modified for Excel export
+                date_str = self.vars.session_date.get()
+                if date_str:
+                    try:
+                        session_date = datetime.strptime(date_str, "%m/%d/%Y")
+                        self._modified_years.add(session_date.year)
+                    except ValueError:
+                        pass
                 
                 # Update weekend count display
                 weekend_count = self.db.get_weekend_attendance_count(member_id)
