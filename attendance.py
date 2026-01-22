@@ -36,6 +36,7 @@ import sv
 import ui_support
 import database
 import config
+from splash_screen import SplashScreen
 
 
 class TrainingTrackerApp:
@@ -2995,7 +2996,10 @@ def main():
         style.theme_use('clam')
     elif 'vista' in available_themes:
         style.theme_use('vista')
-        
+
+    # Show splash screen
+    splash = SplashScreen(root, version="1.0.0-alpha",
+                                   app_title="Attendance Tracker", github_url="github.com/agelders2021/attendance-tracker")
     app = TrainingTrackerApp(root)
     root.mainloop()
 
