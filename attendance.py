@@ -2000,9 +2000,27 @@ class TrainingTrackerApp:
         self.attendance_frame = ttk.LabelFrame(parent, text="Member Attendance", padding=5)
         self.attendance_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Instructions
-        self.attendance_instructions = ttk.Label(self.attendance_frame, text="Double-click 'Attended' column to toggle Yes/No")
-        self.attendance_instructions.pack(anchor=tk.W, pady=(0, 5))
+        # Top row with instructions and sort options
+        top_row = ttk.Frame(self.attendance_frame)
+        top_row.pack(fill=tk.X, pady=(0, 5))
+        
+        # Instructions (left side)
+        self.attendance_instructions = ttk.Label(top_row, text="Double-click 'Attended' column to toggle Yes/No")
+        self.attendance_instructions.pack(side=tk.LEFT, anchor=tk.W)
+        
+        # Sort options (right side)
+        sort_frame = ttk.Frame(top_row)
+        sort_frame.pack(side=tk.RIGHT)
+        
+        ttk.Label(sort_frame, text="Sort by:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Variable for sort order - default to last name
+        self.attendance_sort_var = tk.StringVar(value="last")
+        
+        ttk.Radiobutton(sort_frame, text="Last Name", variable=self.attendance_sort_var, 
+                        value="last", command=self._on_attendance_sort_changed).pack(side=tk.LEFT, padx=2)
+        ttk.Radiobutton(sort_frame, text="First Name", variable=self.attendance_sort_var, 
+                        value="first", command=self._on_attendance_sort_changed).pack(side=tk.LEFT, padx=2)
         
         # Create treeview with columns
         columns = ("name", "attended", "weekend_count")
@@ -2034,6 +2052,10 @@ class TrainingTrackerApp:
         
         # Initial state - disabled until date is selected
         self._update_attendance_section_state()
+        
+    def _on_attendance_sort_changed(self):
+        """Handle change in attendance list sort order."""
+        self._refresh_attendance_tree()
         
     # ============================================================
     # Event Handlers - Demographics Tab
@@ -3075,6 +3097,9 @@ class TrainingTrackerApp:
             
         if not self.db.database_exists():
             return
+        
+        # Get sort preference
+        sort_by_first = getattr(self, 'attendance_sort_var', None) and self.attendance_sort_var.get() == "first"
             
         session_id = self.vars.selected_session_id.get()
         
@@ -3082,11 +3107,19 @@ class TrainingTrackerApp:
             # Get attendance summary for this session
             attendance_data = self.db.get_member_attendance_summary(session_id)
             
+            # Sort based on preference
+            if sort_by_first:
+                attendance_data.sort(key=lambda x: (x['first_name'].lower(), x['last_name'].lower()))
+            else:
+                attendance_data.sort(key=lambda x: (x['last_name'].lower(), x['first_name'].lower()))
+            
             for i, data in enumerate(attendance_data):
-                name = ui_support.format_member_display_name(
-                    data['first_name'],
-                    data['last_name']
-                )
+                # Format name based on sort preference
+                if sort_by_first:
+                    name = f"{data['first_name']} {data['last_name']}"
+                else:
+                    name = f"{data['last_name']}, {data['first_name']}"
+                    
                 attended = "Yes" if data['attended'] else "No"
                 weekend_count = str(data['weekend_count'])
                 
@@ -3099,11 +3132,19 @@ class TrainingTrackerApp:
             # No session selected, show all members with default No
             members = self.db.get_all_members()
             
+            # Sort based on preference
+            if sort_by_first:
+                members.sort(key=lambda x: (x.get('first_name', '').lower(), x.get('last_name', '').lower()))
+            else:
+                members.sort(key=lambda x: (x.get('last_name', '').lower(), x.get('first_name', '').lower()))
+            
             for i, member in enumerate(members):
-                name = ui_support.format_member_display_name(
-                    member.get('first_name', ''),
-                    member.get('last_name', '')
-                )
+                # Format name based on sort preference
+                if sort_by_first:
+                    name = f"{member.get('first_name', '')} {member.get('last_name', '')}"
+                else:
+                    name = f"{member.get('last_name', '')}, {member.get('first_name', '')}"
+                    
                 weekend_count = self.db.get_weekend_attendance_count(member['id'])
                 
                 tag = 'oddrow' if i % 2 else 'evenrow'
@@ -3138,7 +3179,7 @@ def main():
         pass  # If config can't be loaded, splash will center on screen
     
     # Show splash screen centered over saved main window position
-    splash = SplashScreen(root, version="1.0.2-alpha",
+    splash = SplashScreen(root, version="1.0.3-alpha",
                           app_title="Attendance Tracker", 
                           github_url="github.com/agelders2021/attendance-tracker",
                           main_window_geometry=saved_geometry)
