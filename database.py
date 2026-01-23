@@ -686,7 +686,7 @@ class DatabaseManager:
             session_id = session_data.get('id', -1)
             location = session_data.get('location', '').strip()
             session_date = session_data.get('date', '').strip()
-            session_type = session_data.get('type', 'Weekend')
+            session_type = session_data.get('type', 'Qualifying Training')
             description = session_data.get('description', '')
             
             if not location or not session_date:
@@ -706,7 +706,7 @@ class DatabaseManager:
                 conn.commit()
                 message = "Session updated successfully"
             else:
-                # Check if session already exists
+                # Check if session already exists (same location and date)
                 cursor.execute(
                     "SELECT id FROM training_sessions WHERE location = ? AND session_date = ?",
                     (location, session_date)
@@ -993,14 +993,14 @@ class DatabaseManager:
             return False
             
     def get_weekend_attendance_count(self, member_id: int, months: int = 6) -> int:
-        """Get count of weekend sessions attended by a member in the last N months.
+        """Get count of qualifying training sessions attended by a member in the last N months.
         
         Args:
             member_id: ID of the member
             months: Number of months to look back (default 6)
             
         Returns:
-            Count of weekend sessions attended
+            Count of qualifying training sessions attended
         """
         try:
             conn = self._get_connection()
@@ -1009,13 +1009,13 @@ class DatabaseManager:
             # Calculate cutoff date
             cutoff_date = datetime.now() - timedelta(days=months * 30)
             
-            # Get all weekend sessions in the date range where member attended
+            # Get all qualifying training sessions in the date range where member attended
             cursor.execute('''
                 SELECT COUNT(*) FROM attendance a
                 JOIN training_sessions ts ON a.session_id = ts.id
                 WHERE a.member_id = ?
                 AND a.attended = 1
-                AND ts.session_type = 'Weekend'
+                AND ts.session_type = 'Qualifying Training'
             ''', (member_id,))
             
             # We need to filter by date in Python since date format is MM/DD/YYYY
@@ -1024,7 +1024,7 @@ class DatabaseManager:
                 JOIN training_sessions ts ON a.session_id = ts.id
                 WHERE a.member_id = ?
                 AND a.attended = 1
-                AND ts.session_type = 'Weekend'
+                AND ts.session_type = 'Qualifying Training'
             ''', (member_id,))
             
             count = 0
@@ -1039,7 +1039,7 @@ class DatabaseManager:
             return count
             
         except sqlite3.Error as e:
-            print(f"Error getting weekend attendance count: {e}")
+            print(f"Error getting qualifying training attendance count: {e}")
             return 0
             
     def get_member_attendance_summary(self, session_id: int) -> List[Dict]:
@@ -1339,7 +1339,7 @@ class DatabaseManager:
                 ''', (
                     session.get("location", ""),
                     session.get("session_date", ""),
-                    session.get("session_type", "Weekend"),
+                    session.get("session_type", "Qualifying Training"),
                     session.get("description", "")
                 ))
                 session_id_map[old_id] = cursor.lastrowid

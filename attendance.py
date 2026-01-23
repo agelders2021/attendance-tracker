@@ -352,8 +352,8 @@ class TrainingTrackerApp:
             
             # Define fill colors for session types (header cells only)
             fills = {
-                'Weekday': PatternFill('solid', fgColor='ADD8E6'),   # Light blue
-                'Weekend': PatternFill('solid', fgColor='FFFF00'),   # Yellow
+                'Optional Training': PatternFill('solid', fgColor='ADD8E6'),   # Light blue
+                'Qualifying Training': PatternFill('solid', fgColor='FFFF00'),   # Yellow
                 'Mission': PatternFill('solid', fgColor='FF6B6B'),   # Light red
                 'Other': PatternFill('solid', fgColor='90EE90'),     # Light green
             }
@@ -430,7 +430,7 @@ class TrainingTrackerApp:
                         # Format as M/D (no year, no leading zeros)
                         date_short = f"{parsed_date.month}/{parsed_date.day}"
                         location = session.get('location', '')
-                        session_type = session.get('type', 'Weekend')
+                        session_type = session.get('type', 'Qualifying Training')
                         header_text = f"{date_short} {location}"
                         
                         cell = ws.cell(row=2, column=col, value=header_text)
@@ -562,10 +562,13 @@ class TrainingTrackerApp:
                 # DEBUG: print("DEBUG: Email - No sessions in last 6 months for email")
                 return
                 
-            # Count total weekend sessions in last 6 months
+            # Count total qualifying training sessions in last 6 months
             # NOTE: get_all_sessions renames session_type->type
-            total_weekend_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Weekend')
-            # DEBUG: print(f"DEBUG: Email - Total weekend sessions in 6mo period: {total_weekend_sessions}")
+            total_qualifying_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Qualifying Training')
+            total_optional_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Optional Training')
+            total_mission_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Mission')
+            total_other_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Other')
+            # DEBUG: print(f"DEBUG: Email - Total qualifying training sessions in 6mo period: {total_qualifying_sessions}")
             
             # ===DEBUG=== Generate PDF preview and send emails
             # print("DEBUG: Email - Generating PDFs and sending emails")
@@ -637,9 +640,11 @@ class TrainingTrackerApp:
                 # DEBUG: print(f"DEBUG: Email - Processing member: {member_name} <{email}>")
                 
                 # Generate PDF for this member
-                # Pass 3mo sessions for table, 6mo sessions for weekend count
+                # Pass 3mo sessions for table, 6mo sessions for counts
                 pdf_path = self._generate_member_attendance_pdf(
-                    member, sessions_3mo, sessions_6mo, total_weekend_sessions
+                    member, sessions_3mo, sessions_6mo, 
+                    total_qualifying_sessions, total_optional_sessions,
+                    total_mission_sessions, total_other_sessions
                 )
                 
                 if pdf_path:
@@ -717,14 +722,19 @@ class TrainingTrackerApp:
         except Exception as e:
             print(f"Error sending emails: {e}")
             
-    def _generate_member_attendance_pdf(self, member: dict, sessions_3mo: list, sessions_6mo: list, total_weekend: int) -> str:
+    def _generate_member_attendance_pdf(self, member: dict, sessions_3mo: list, sessions_6mo: list, 
+                                          total_qualifying: int, total_optional: int,
+                                          total_mission: int, total_other: int) -> str:
         """Generate attendance PDF for a single member.
         
         Args:
             member: Member dictionary
             sessions_3mo: List of session dictionaries for last 3 months (for table)
-            sessions_6mo: List of session dictionaries for last 6 months (for weekend count)
-            total_weekend: Total number of weekend sessions in last 6 months
+            sessions_6mo: List of session dictionaries for last 6 months (for counts)
+            total_qualifying: Total number of qualifying training sessions in last 6 months
+            total_optional: Total number of optional training sessions in last 6 months
+            total_mission: Total number of missions in last 6 months
+            total_other: Total number of other sessions in last 6 months
             
         Returns:
             Path to generated PDF file, or None on error
@@ -741,17 +751,29 @@ class TrainingTrackerApp:
             
             # DEBUG: Print member info
             # print(f"DEBUG: PDF - Generating PDF for {member_name} (ID: {member_id})")
-            # print(f"DEBUG: PDF - Sessions for table (3mo): {len(sessions_3mo)}, Sessions for count (6mo): {len(sessions_6mo)}, Total weekend: {total_weekend}")
+            # print(f"DEBUG: PDF - Sessions for table (3mo): {len(sessions_3mo)}, Sessions for count (6mo): {len(sessions_6mo)}, Total qualifying: {total_qualifying}")
             
-            # Calculate weekend attendance from 6 month data
-            weekend_attended = 0
+            # Calculate attendance for each session type from 6 month data
+            qualifying_attended = 0
+            optional_attended = 0
+            mission_attended = 0
+            other_attended = 0
+            
             for session in sessions_6mo:
                 session_id = session.get('id')
                 attended = self.db.get_attendance_status(session_id, member_id)
-                if session.get('type', '') == 'Weekend' and attended:
-                    weekend_attended += 1
+                session_type = session.get('type', '')
+                if attended:
+                    if session_type == 'Qualifying Training':
+                        qualifying_attended += 1
+                    elif session_type == 'Optional Training':
+                        optional_attended += 1
+                    elif session_type == 'Mission':
+                        mission_attended += 1
+                    elif session_type == 'Other':
+                        other_attended += 1
             
-            # DEBUG: print(f"DEBUG: PDF - Member attended {weekend_attended} weekend sessions in 6mo")
+            # DEBUG: print(f"DEBUG: PDF - Member attended {qualifying_attended} qualifying training sessions in 6mo")
             
             # Create temp file
             fd, pdf_path = tempfile.mkstemp(suffix='.pdf')
@@ -765,16 +787,34 @@ class TrainingTrackerApp:
             story.append(Paragraph(f"505 SAR Dogs Attendance Record for {member_name}", styles['Title']))
             story.append(Spacer(1, 12))
             
-            # Preface
-            preface = "Recorded sessions over the last three months."
-            story.append(Paragraph(preface, styles['Normal']))
+            # Summary lines (moved above table)
+            summary_qualifying = f"You attended {qualifying_attended} out of {total_qualifying} qualifying training sessions in the last 6 months."
+            story.append(Paragraph(summary_qualifying, styles['Normal']))
+            story.append(Spacer(1, 6))
+            
+            summary_optional = f"You attended {optional_attended} out of {total_optional} optional training sessions in the last 6 months."
+            story.append(Paragraph(summary_optional, styles['Normal']))
+            story.append(Spacer(1, 6))
+            
+            summary_mission = f"You attended {mission_attended} out of {total_mission} missions in the last 6 months."
+            story.append(Paragraph(summary_mission, styles['Normal']))
+            story.append(Spacer(1, 6))
+            
+            summary_other = f"You attended {other_attended} out of {total_other} other sessions in the last 6 months."
+            story.append(Paragraph(summary_other, styles['Normal']))
             story.append(Spacer(1, 20))
+            
+            # Sort sessions chronologically by date (oldest first)
+            sessions_3mo_sorted = sorted(sessions_3mo, key=lambda s: datetime.strptime(s.get('date', '01/01/2000'), "%m/%d/%Y"))
             
             # Build table data from 3 month sessions
             # NOTE: get_all_sessions renames session_date->date and session_type->type
-            table_data = [['Date', 'Location', 'Type', 'Attended']]
+            # First row is the header text spanning all columns
+            table_data = [['Recorded sessions over the last three months.', '', '', '']]
+            # Second row is the column headers
+            table_data.append(['Date', 'Location', 'Type', 'Attended'])
             
-            for session in sessions_3mo:
+            for session in sessions_3mo_sorted:
                 session_id = session.get('id')
                 attended = self.db.get_attendance_status(session_id, member_id)
                 attended_str = "Yes" if attended else "No"
@@ -788,28 +828,33 @@ class TrainingTrackerApp:
             
             # DEBUG: Print table data summary
             # print(f"DEBUG: PDF - Table has {len(table_data)} rows (including header)")
-            # if len(table_data) > 1:
-            #     print(f"DEBUG: PDF - First data row: {table_data[1]}")
+            # if len(table_data) > 2:
+            #     print(f"DEBUG: PDF - First data row: {table_data[2]}")
             
             # Create table
-            table = Table(table_data, colWidths=[80, 150, 80, 60])
+            table = Table(table_data, colWidths=[80, 150, 100, 60])
             table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                # Spanning header row (row 0)
+                ('SPAN', (0, 0), (-1, 0)),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('TOPPADDING', (0, 0), (-1, 0), 8),
+                # Column headers row (row 1)
+                ('BACKGROUND', (0, 1), (-1, 1), colors.grey),
+                ('TEXTCOLOR', (0, 1), (-1, 1), colors.whitesmoke),
+                ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 1), (-1, 1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
+                # Data rows (row 2+)
+                ('BACKGROUND', (0, 2), (-1, -1), colors.beige),
                 ('GRID', (0, 0), (-1, -1), 1, colors.black),
             ]))
             
             story.append(table)
-            story.append(Spacer(1, 20))
-            
-            # Summary line (from 6 month data)
-            summary = f"You attended {weekend_attended} out of {total_weekend} weekend sessions in the last 6 months."
-            story.append(Paragraph(summary, styles['Normal']))
             
             # Build PDF
             doc.build(story)
@@ -1966,7 +2011,7 @@ class TrainingTrackerApp:
         # Configure columns
         self.attendance_tree.heading("name", text="Name")
         self.attendance_tree.heading("attended", text="Attended")
-        self.attendance_tree.heading("weekend_count", text="Total Weekend Attended Last 6 mo")
+        self.attendance_tree.heading("weekend_count", text="Qualifying Training Last 6 mo")
         
         self.attendance_tree.column("name", width=200, anchor=tk.W)
         self.attendance_tree.column("attended", width=100, anchor=tk.CENTER)
@@ -2434,13 +2479,13 @@ class TrainingTrackerApp:
         # Update attendance section state based on whether date is selected
         self._update_attendance_section_state()
         
-        # Only auto-set Weekend/Weekday if a date was actually selected (not empty)
+        # Only auto-set Qualifying Training/Optional Training if a date was actually selected (not empty)
         if date_str and date_str.strip():
             suggested_type = ui_support.suggest_session_type(date_str)
             current_type = self.vars.session_type.get()
             
-            # Only auto-set if currently Weekend or Weekday (not Mission/Other)
-            if current_type in ("Weekend", "Weekday"):
+            # Only auto-set if currently Qualifying Training or Optional Training (not Mission/Other)
+            if current_type in ("Qualifying Training", "Optional Training"):
                 self.vars.session_type.set(suggested_type)
                 self._on_session_type_changed()
                 
@@ -2482,10 +2527,10 @@ class TrainingTrackerApp:
             is_valid, result = ui_support.validate_date(date_str)
             if is_valid:
                 self.vars.session_date.set(result)
-                # Auto-set Weekend/Weekday
+                # Auto-set Qualifying Training/Optional Training
                 suggested_type = ui_support.suggest_session_type(result)
                 current_type = self.vars.session_type.get()
-                if current_type in ("Weekend", "Weekday"):
+                if current_type in ("Qualifying Training", "Optional Training"):
                     self.vars.session_type.set(suggested_type)
                     self._on_session_type_changed()
                 # Check for existing session
@@ -2506,7 +2551,10 @@ class TrainingTrackerApp:
             self.vars.session_description.set("")
             
     def _check_and_load_existing_session(self, date_str: str):
-        """Check if there's an existing session on the date and offer to load it.
+        """Check if there are existing sessions on the date and inform the user.
+        
+        Multiple sessions can exist on the same day at different locations,
+        or with different types (e.g., training + mission).
         
         Args:
             date_str: Date string in MM/DD/YYYY format
@@ -2516,24 +2564,108 @@ class TrainingTrackerApp:
             
         matching_sessions = self.db.get_sessions_by_date(date_str)
         
-        if matching_sessions:
-            # If there's a Mission session, prioritize loading it
-            mission_sessions = [s for s in matching_sessions if s.get('type') == 'Mission']
+        if not matching_sessions:
+            return
             
-            if mission_sessions:
-                session = mission_sessions[0]
-                if messagebox.askyesno("Load Session", 
-                                       f"A Mission session exists for {date_str}.\n"
-                                       "Would you like to load it?"):
-                    self._load_session_data(session)
-            elif len(matching_sessions) == 1:
-                # Only one session, offer to load it
-                session = matching_sessions[0]
-                session_type = session.get('type', 'Unknown')
-                if messagebox.askyesno("Load Session",
-                                       f"A {session_type} session exists for {date_str}.\n"
-                                       "Would you like to load it?"):
-                    self._load_session_data(session)
+        if len(matching_sessions) == 1:
+            # Only one session exists on this date
+            session = matching_sessions[0]
+            session_type = session.get('type', 'Unknown')
+            location = session.get('location', '')
+            response = messagebox.askyesnocancel(
+                "Existing Session Found",
+                f"A {session_type} session already exists for {date_str} at {location}.\n\n"
+                "• Yes - Load the existing session\n"
+                "• No - Create a new session (different location or type)\n"
+                "• Cancel - Clear the date"
+            )
+            if response is True:  # Yes - load it
+                self._load_session_data(session)
+            elif response is False:  # No - continue with new session
+                pass  # User wants to create a new session
+            else:  # Cancel
+                self.vars.session_date.set("")
+                if ui_support.TKCALENDAR_AVAILABLE and self.date_entry:
+                    self.date_entry.delete(0, tk.END)
+        else:
+            # Multiple sessions exist on this date
+            self._show_session_selection_popup(date_str, matching_sessions)
+            
+    def _show_session_selection_popup(self, date_str: str, sessions: list):
+        """Show a popup to select which session to load when multiple exist.
+        
+        Args:
+            date_str: Date string
+            sessions: List of session dictionaries
+        """
+        popup = tk.Toplevel(self.root)
+        popup.title(f"Sessions on {date_str}")
+        popup.geometry("500x350")
+        popup.transient(self.root)
+        popup.grab_set()
+        
+        # Center on parent
+        popup.geometry(f"+{self.root.winfo_x() + 150}+{self.root.winfo_y() + 150}")
+        
+        # Instructions
+        ttk.Label(popup, 
+                  text=f"Multiple sessions exist for {date_str}.\n"
+                       "Select one to load, or click 'New Session' to create another:",
+                  justify=tk.LEFT).pack(pady=(10, 5), padx=10, anchor=tk.W)
+        
+        # Listbox with scrollbar
+        list_frame = ttk.Frame(popup)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, height=8)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=listbox.yview)
+        
+        # Populate listbox
+        session_map = {}
+        for session in sessions:
+            session_type = session.get('type', 'Unknown')
+            location = session.get('location', '')
+            description = session.get('description', '')
+            display_text = f"{session_type} at {location}"
+            if description:
+                display_text += f" - {description[:30]}..."
+            listbox.insert(tk.END, display_text)
+            session_map[display_text] = session
+            
+        # Button frame
+        btn_frame = ttk.Frame(popup)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        def on_load():
+            selection = listbox.curselection()
+            if not selection:
+                messagebox.showwarning("Select Session", "Please select a session to load.")
+                return
+                
+            display_text = listbox.get(selection[0])
+            session = session_map.get(display_text)
+            
+            if session:
+                popup.destroy()
+                self._load_session_data(session)
+                
+        def on_new():
+            popup.destroy()
+            # User wants to create a new session on this date
+            
+        def on_cancel():
+            popup.destroy()
+            self.vars.session_date.set("")
+            if ui_support.TKCALENDAR_AVAILABLE and self.date_entry:
+                self.date_entry.delete(0, tk.END)
+            
+        ttk.Button(btn_frame, text="Load Selected", command=on_load).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="New Session", command=on_new).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=5)
                     
     def _load_session_data(self, session: dict):
         """Load session data into the form fields.
@@ -2543,7 +2675,7 @@ class TrainingTrackerApp:
         """
         self.vars.session_location.set(session.get('location', ''))
         self.vars.session_date.set(session.get('date', ''))
-        self.vars.session_type.set(session.get('type', 'Weekend'))
+        self.vars.session_type.set(session.get('type', 'Qualifying Training'))
         self.vars.session_description.set(session.get('description', ''))
         self.vars.selected_session_id.set(session.get('id', -1))
         
@@ -3006,7 +3138,7 @@ def main():
         pass  # If config can't be loaded, splash will center on screen
     
     # Show splash screen centered over saved main window position
-    splash = SplashScreen(root, version="1.0.1-alpha",
+    splash = SplashScreen(root, version="1.0.2-alpha",
                           app_title="Attendance Tracker", 
                           github_url="github.com/agelders2021/attendance-tracker",
                           main_window_geometry=saved_geometry)

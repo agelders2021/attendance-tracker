@@ -227,24 +227,24 @@ def get_session_types() -> List[str]:
     Returns:
         List of session type names
     """
-    return ["Weekend", "Weekday", "Mission", "Other"]
+    return ["Qualifying Training", "Optional Training", "Mission", "Other"]
 
 
 def calculate_weekend_sessions_count(sessions: List[Dict], member_id: int) -> int:
-    """Calculate the number of weekend sessions a member attended in the last 6 months.
+    """Calculate the number of qualifying training sessions a member attended in the last 6 months.
     
     Args:
         sessions: List of session dictionaries with attendance data
         member_id: ID of the member to check
         
     Returns:
-        Count of weekend sessions attended
+        Count of qualifying training sessions attended
     """
     six_months_ago = datetime.now() - timedelta(days=180)
     count = 0
     
     for session in sessions:
-        if session.get("type") == "Weekend":
+        if session.get("type") == "Qualifying Training":
             try:
                 session_date = datetime.strptime(session.get("date", ""), DATE_FORMAT)
                 if session_date >= six_months_ago:
@@ -464,7 +464,7 @@ class UIState:
         location = current_data.get('location', '').strip()
         date = current_data.get('date', '').strip()
         description = current_data.get('description', '').strip()
-        session_type = current_data.get('type', 'Weekend')
+        session_type = current_data.get('type', 'Qualifying Training')
         
         # If no saved state, check if form has meaningful content
         if not self.last_saved_session_data:
@@ -478,7 +478,7 @@ class UIState:
         saved_location = self.last_saved_session_data.get('location', '').strip()
         saved_date = self.last_saved_session_data.get('date', '').strip()
         saved_description = self.last_saved_session_data.get('description', '').strip()
-        saved_type = self.last_saved_session_data.get('type', 'Weekend')
+        saved_type = self.last_saved_session_data.get('type', 'Qualifying Training')
         
         # Check each field for changes
         if location != saved_location:
@@ -512,8 +512,8 @@ def get_ui_state() -> UIState:
 
 # Session type colors for calendar highlighting
 SESSION_COLORS = {
-    "Weekend": "#FFFF00",    # Yellow
-    "Weekday": "#87CEEB",    # Light Blue
+    "Qualifying Training": "#FFFF00",    # Yellow
+    "Optional Training": "#87CEEB",    # Light Blue
     "Mission": "#FF6B6B",    # Red
     "Other": "#90EE90",      # Light Green
 }
@@ -522,8 +522,8 @@ SESSION_COLORS = {
 class TrainingDateEntry(DateEntry if TKCALENDAR_AVAILABLE else object):
     """Custom DateEntry that highlights past training sessions by type.
     
-    - Weekend sessions: Yellow
-    - Weekday sessions: Blue
+    - Qualifying Training sessions: Yellow
+    - Optional Training sessions: Blue
     - Mission sessions: Red
     - Other sessions: Green
     """
@@ -657,12 +657,12 @@ def suggest_session_type(date_str: str) -> str:
         date_str: Date in MM/DD/YYYY format
         
     Returns:
-        'Weekend' or 'Weekday' based on the date
+        'Qualifying Training' or 'Optional Training' based on the date
     """
     is_weekend = is_weekend_date(date_str)
     if is_weekend is None:
-        return "Weekend"  # Default
-    return "Weekend" if is_weekend else "Weekday"
+        return "Qualifying Training"  # Default
+    return "Qualifying Training" if is_weekend else "Optional Training"
 
 
 def get_unique_locations(sessions: List[Dict]) -> List[str]:

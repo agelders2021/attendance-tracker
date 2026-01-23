@@ -82,7 +82,7 @@ class AppVariables:
         # Session Details
         self.session_location = tk.StringVar()
         self.session_date = tk.StringVar()
-        self.session_type = tk.StringVar(value="Weekend")  # Default to Weekend
+        self.session_type = tk.StringVar(value="Qualifying Training")  # Default to Qualifying Training
         self.session_description = tk.StringVar()  # For Mission/Other description
         
         # Currently selected session ID
@@ -135,7 +135,7 @@ class AppVariables:
         """Clear all training session fields."""
         self.session_location.set("")
         self.session_date.set("")
-        self.session_type.set("Weekend")
+        self.session_type.set("Qualifying Training")
         self.session_description.set("")
         self.selected_session_id.set(-1)
         
