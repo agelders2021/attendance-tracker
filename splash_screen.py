@@ -41,7 +41,7 @@ DEFAULT_GITHUB_URL = "github.com/agelders2021/airscent_tracker"
 class SplashScreen:
     """Display a splash screen while the application loads"""
     
-    def __init__(self, parent, version="1.0.0-alpha", app_title=None, github_url=None):
+    def __init__(self, parent, version="1.0.0-alpha", app_title=None, github_url=None, main_window_geometry=None):
         self.version = version
         self.app_title = app_title or DEFAULT_APP_TITLE
         self.github_url = github_url or DEFAULT_GITHUB_URL
@@ -62,11 +62,37 @@ class SplashScreen:
         width = 500
         height = 500
         
-        # Center on screen
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        x = (screen_width - width) // 2
-        y = (screen_height - height) // 2
+        # Center on main window if geometry provided, otherwise center on screen
+        if main_window_geometry:
+            try:
+                import re
+                match = re.match(r'(\d+)x(\d+)([+-]\d+)([+-]\d+)', main_window_geometry)
+                if match:
+                    main_w, main_h, main_x, main_y = match.groups()
+                    main_w, main_h = int(main_w), int(main_h)
+                    main_x, main_y = int(main_x), int(main_y)
+                    # Center splash over main window
+                    x = main_x + (main_w - width) // 2
+                    y = main_y + (main_h - height) // 2
+                else:
+                    # Fallback to screen center
+                    screen_width = self.root.winfo_screenwidth()
+                    screen_height = self.root.winfo_screenheight()
+                    x = (screen_width - width) // 2
+                    y = (screen_height - height) // 2
+            except Exception:
+                # Fallback to screen center
+                screen_width = self.root.winfo_screenwidth()
+                screen_height = self.root.winfo_screenheight()
+                x = (screen_width - width) // 2
+                y = (screen_height - height) // 2
+        else:
+            # Center on screen
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            x = (screen_width - width) // 2
+            y = (screen_height - height) // 2
+        
         self.root.geometry(f"{width}x{height}+{x}+{y}")
         
         # Create frame with border
@@ -96,7 +122,7 @@ class SplashScreen:
         # Copyright
         copyright_label = tk.Label(
             frame,
-            text="© 2025 Al Gelders",
+            text="Â© 2025 Al Gelders",
             font=('Arial', 11),
             bg='white',
             fg='#34495e'

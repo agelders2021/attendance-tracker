@@ -2997,9 +2997,19 @@ def main():
     elif 'vista' in available_themes:
         style.theme_use('vista')
 
-    # Show splash screen
-    splash = SplashScreen(root, version="1.0.0-alpha",
-                                   app_title="Attendance Tracker", github_url="github.com/agelders2021/attendance-tracker")
+    # Read saved window geometry from config file for splash screen positioning
+    saved_geometry = None
+    try:
+        cfg = config.load_config()
+        saved_geometry = cfg.get("window_geometry", "")
+    except Exception:
+        pass  # If config can't be loaded, splash will center on screen
+    
+    # Show splash screen centered over saved main window position
+    splash = SplashScreen(root, version="1.0.1-alpha",
+                          app_title="Attendance Tracker", 
+                          github_url="github.com/agelders2021/attendance-tracker",
+                          main_window_geometry=saved_geometry)
     app = TrainingTrackerApp(root)
     root.mainloop()
 
