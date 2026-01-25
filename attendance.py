@@ -178,6 +178,7 @@ class TrainingTrackerApp:
         self.vars.sender_email.set(self.config.sender_email or "")
         self.vars.sender_password.set(self.config.sender_password or "")
         self.vars.smtp_encryption.set(self.config.smtp_encryption or "TLS")
+        self.vars.pdf_months_to_review.set(self.config.pdf_months_to_review)
             
         # Restore window geometry if saved
         geometry = self.config.window_geometry
@@ -224,18 +225,18 @@ class TrainingTrackerApp:
                 
     def _on_closing(self):
         """Handle window closing - create backup and save configuration."""
-        # Create backup if database exists and backup folder is set
+        # Generate Excel participation file if folder is set and data was modified
+        excel_folder = self.vars.excel_participation_folder.get()
+        if self.db.database_exists() and excel_folder and self._modified_years:
+            self._generate_participation_excel(excel_folder)
+        
+        # Create backup only if data was modified (indicated by _modified_years not empty)
         backup_folder = self.vars.secondary_backup_folder.get()
-        if self.db.database_exists() and backup_folder:
+        if self.db.database_exists() and backup_folder and self._modified_years:
             self._create_exit_backup(backup_folder)
             
             # Check if we should clean up old backups (once per month)
             self._cleanup_old_backups(backup_folder)
-        
-        # Generate Excel participation file if folder is set
-        excel_folder = self.vars.excel_participation_folder.get()
-        if self.db.database_exists() and excel_folder:
-            self._generate_participation_excel(excel_folder)
             
         # Send monthly emails if it's a new month
         if self.db.database_exists():
@@ -254,6 +255,7 @@ class TrainingTrackerApp:
         self.config.sender_email = self.vars.sender_email.get()
         self.config.sender_password = self.vars.sender_password.get()
         self.config.smtp_encryption = self.vars.smtp_encryption.get()
+        self.config.pdf_months_to_review = self.vars.pdf_months_to_review.get()
         self.config.window_geometry = self.root.geometry()
         self.config.save()
         
@@ -493,6 +495,321 @@ class TrainingTrackerApp:
             self.config.last_email_month = current_month
             self.config.save()
             
+    def _show_attendance_review_dialog(self, members: list):
+        """Show a dialog to select members and date range for PDF generation.
+        
+        Args:
+            members: List of member dictionaries
+        """
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Review Attendance")
+        dialog.geometry("450x550")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center on parent
+        dialog.geometry(f"+{self.root.winfo_x() + 200}+{self.root.winfo_y() + 50}")
+        
+        # Date range section
+        date_frame = ttk.LabelFrame(dialog, text="Date Range", padding=5)
+        date_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        
+        # Start Date
+        start_row = ttk.Frame(date_frame)
+        start_row.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(start_row, text="Start Date:", width=10).pack(side=tk.LEFT)
+        
+        # Use DateEntry if available, otherwise regular entry
+        if ui_support.TKCALENDAR_AVAILABLE:
+            from tkcalendar import DateEntry
+            start_date_var = tk.StringVar()
+            start_date_entry = DateEntry(start_row, textvariable=start_date_var, 
+                                          date_pattern='mm/dd/yyyy', width=12)
+            # Default to 1 month ago
+            default_start = datetime.now() - timedelta(days=30)
+            start_date_entry.set_date(default_start)
+        else:
+            start_date_var = tk.StringVar(value=(datetime.now() - timedelta(days=30)).strftime("%m/%d/%Y"))
+            start_date_entry = ttk.Entry(start_row, textvariable=start_date_var, width=15)
+        start_date_entry.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # End Date
+        end_row = ttk.Frame(date_frame)
+        end_row.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(end_row, text="End Date:", width=10).pack(side=tk.LEFT)
+        
+        if ui_support.TKCALENDAR_AVAILABLE:
+            end_date_var = tk.StringVar()
+            end_date_entry = DateEntry(end_row, textvariable=end_date_var, 
+                                        date_pattern='mm/dd/yyyy', width=12)
+            # Default to today
+            end_date_entry.set_date(datetime.now())
+        else:
+            end_date_var = tk.StringVar(value=datetime.now().strftime("%m/%d/%Y"))
+            end_date_entry = ttk.Entry(end_row, textvariable=end_date_var, width=15)
+        end_date_entry.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Member selection section
+        member_frame = ttk.LabelFrame(dialog, text="Select Members", padding=5)
+        member_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Listbox with scrollbar for multi-selection
+        list_frame = ttk.Frame(member_frame)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, selectmode=tk.EXTENDED, height=12)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=listbox.yview)
+        
+        # Populate listbox with members (sorted by last name)
+        member_map = {}
+        sorted_members = sorted(members, key=lambda m: (m.get('last_name', '').lower(), m.get('first_name', '').lower()))
+        for member in sorted_members:
+            display_name = f"{member.get('last_name', '')}, {member.get('first_name', '')}"
+            listbox.insert(tk.END, display_name)
+            member_map[display_name] = member
+        
+        # Select All / Deselect All buttons
+        select_frame = ttk.Frame(member_frame)
+        select_frame.pack(fill=tk.X, pady=5)
+        
+        def select_all():
+            listbox.select_set(0, tk.END)
+            
+        def deselect_all():
+            listbox.select_clear(0, tk.END)
+        
+        ttk.Button(select_frame, text="Select All", command=select_all).pack(side=tk.LEFT, padx=5)
+        ttk.Button(select_frame, text="Deselect All", command=deselect_all).pack(side=tk.LEFT, padx=5)
+        
+        # Button frame
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        def on_execute():
+            # Validate date range
+            start_str = start_date_var.get().strip()
+            end_str = end_date_var.get().strip()
+            
+            if not start_str or not end_str:
+                messagebox.showwarning("Date Required", "Please enter both Start Date and End Date.")
+                return
+            
+            # Validate dates
+            is_valid, result = ui_support.validate_date(start_str)
+            if not is_valid:
+                messagebox.showwarning("Invalid Start Date", result)
+                return
+            start_str = result
+            
+            is_valid, result = ui_support.validate_date(end_str)
+            if not is_valid:
+                messagebox.showwarning("Invalid End Date", result)
+                return
+            end_str = result
+            
+            # Parse dates
+            try:
+                start_date = datetime.strptime(start_str, "%m/%d/%Y")
+                end_date = datetime.strptime(end_str, "%m/%d/%Y")
+            except ValueError as e:
+                messagebox.showwarning("Date Error", f"Error parsing dates: {e}")
+                return
+            
+            if start_date > end_date:
+                messagebox.showwarning("Date Range Error", "Start Date must be before or equal to End Date.")
+                return
+            
+            # Validate member selection
+            selection = listbox.curselection()
+            if not selection:
+                messagebox.showwarning("No Selection", "Please select at least one member.")
+                return
+            
+            # Get selected members
+            selected_members = []
+            for idx in selection:
+                display_name = listbox.get(idx)
+                member = member_map.get(display_name)
+                if member:
+                    selected_members.append(member)
+            
+            dialog.destroy()
+            
+            # Generate PDF for selected members with date range
+            self._generate_pdf_for_date_range(selected_members, start_date, end_date)
+        
+        def on_cancel():
+            dialog.destroy()
+        
+        ttk.Button(btn_frame, text="Execute", command=on_execute).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=5)
+        
+    def _generate_pdf_for_date_range(self, selected_members: list, start_date: datetime, end_date: datetime):
+        """Generate PDF for the selected members within the specified date range.
+        
+        Args:
+            selected_members: List of member dictionaries to include
+            start_date: Start date for session filtering
+            end_date: End date for session filtering
+        """
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib import colors
+            import tempfile
+            import subprocess
+            import sys
+            
+            if not selected_members:
+                return
+            
+            all_sessions = self.db.get_all_sessions()
+            
+            # Filter sessions to the specified date range
+            sessions_in_range = []
+            for session in all_sessions:
+                try:
+                    session_date = datetime.strptime(session.get('date', ''), "%m/%d/%Y")
+                    if start_date <= session_date <= end_date:
+                        sessions_in_range.append(session)
+                except ValueError:
+                    continue
+            
+            if not sessions_in_range:
+                messagebox.showinfo("No Sessions", 
+                                    f"No sessions found between {start_date.strftime('%m/%d/%Y')} and {end_date.strftime('%m/%d/%Y')}.")
+                return
+            
+            # Count totals for the date range
+            total_qualifying = sum(1 for s in sessions_in_range if s.get('type') == 'Qualifying Training')
+            total_optional = sum(1 for s in sessions_in_range if s.get('type') == 'Optional Training')
+            total_mission = sum(1 for s in sessions_in_range if s.get('type') == 'Mission')
+            total_other = sum(1 for s in sessions_in_range if s.get('type') == 'Other')
+            
+            # Create temp file for combined PDF
+            fd, pdf_path = tempfile.mkstemp(suffix='.pdf')
+            os.close(fd)
+            
+            doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            # Format date range for display
+            date_range_str = f"{start_date.strftime('%m/%d/%Y')} to {end_date.strftime('%m/%d/%Y')}"
+            
+            # Generate pages for each selected member (sorted by last name, first name)
+            sorted_members = sorted(selected_members, key=lambda m: (m.get('last_name', '').lower(), m.get('first_name', '').lower()))
+            
+            for i, member in enumerate(sorted_members):
+                if i > 0:
+                    story.append(PageBreak())
+                    
+                member_id = member.get('id')
+                member_name = f"{member.get('first_name', '')} {member.get('last_name', '')}"
+                
+                # Calculate attendance for each session type within the date range
+                qualifying_attended = 0
+                optional_attended = 0
+                mission_attended = 0
+                other_attended = 0
+                
+                for session in sessions_in_range:
+                    session_id = session.get('id')
+                    attended = self.db.get_attendance_status(session_id, member_id)
+                    session_type = session.get('type', '')
+                    if attended:
+                        if session_type == 'Qualifying Training':
+                            qualifying_attended += 1
+                        elif session_type == 'Optional Training':
+                            optional_attended += 1
+                        elif session_type == 'Mission':
+                            mission_attended += 1
+                        elif session_type == 'Other':
+                            other_attended += 1
+                
+                # Title
+                story.append(Paragraph(f"505 SAR Dogs Attendance Record for {member_name}", styles['Title']))
+                story.append(Spacer(1, 12))
+                
+                # Date range subtitle
+                story.append(Paragraph(f"Period: {date_range_str}", styles['Normal']))
+                story.append(Spacer(1, 12))
+                
+                # Summary lines
+                story.append(Paragraph(f"Attended {qualifying_attended} out of {total_qualifying} qualifying training sessions.", styles['Normal']))
+                story.append(Spacer(1, 6))
+                story.append(Paragraph(f"Attended {optional_attended} out of {total_optional} optional training sessions.", styles['Normal']))
+                story.append(Spacer(1, 6))
+                story.append(Paragraph(f"Attended {mission_attended} out of {total_mission} missions.", styles['Normal']))
+                story.append(Spacer(1, 6))
+                story.append(Paragraph(f"Attended {other_attended} out of {total_other} other sessions.", styles['Normal']))
+                story.append(Spacer(1, 20))
+                
+                # Build table with sessions in range
+                if sessions_in_range:
+                    sessions_sorted = sorted(sessions_in_range, key=lambda s: datetime.strptime(s.get('date', '01/01/2000'), "%m/%d/%Y"))
+                    
+                    table_data = [[f'Sessions from {date_range_str}', '', '', '']]
+                    table_data.append(['Date', 'Location', 'Type', 'Attended'])
+                    
+                    for session in sessions_sorted:
+                        session_id = session.get('id')
+                        attended = self.db.get_attendance_status(session_id, member_id)
+                        attended_str = "Yes" if attended else "No"
+                        
+                        table_data.append([
+                            session.get('date', ''),
+                            session.get('location', ''),
+                            session.get('type', ''),
+                            attended_str
+                        ])
+                    
+                    table = Table(table_data, colWidths=[80, 150, 100, 60])
+                    table.setStyle(TableStyle([
+                        ('SPAN', (0, 0), (-1, 0)),
+                        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, 0), 10),
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                        ('TOPPADDING', (0, 0), (-1, 0), 8),
+                        ('BACKGROUND', (0, 1), (-1, 1), colors.grey),
+                        ('TEXTCOLOR', (0, 1), (-1, 1), colors.whitesmoke),
+                        ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 1), (-1, 1), 10),
+                        ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
+                        ('BACKGROUND', (0, 2), (-1, -1), colors.beige),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ]))
+                    
+                    story.append(table)
+            
+            # Build PDF
+            doc.build(story)
+            
+            # Open with system default PDF viewer
+            if sys.platform == 'win32':
+                os.startfile(pdf_path)
+            elif sys.platform == 'darwin':  # macOS
+                subprocess.run(['open', pdf_path])
+            else:  # Linux
+                subprocess.run(['xdg-open', pdf_path])
+                
+        except ImportError as e:
+            print(f"Required library not installed for PDF: {e}")
+            messagebox.showerror("Missing Library", f"Required library not installed: {e}")
+        except Exception as e:
+            print(f"Error generating PDF preview: {e}")
+            messagebox.showerror("PDF Error", f"Error generating PDF: {e}")
+            
     def _send_attendance_emails_to_all(self):
         """Send attendance PDF emails to all members with email addresses."""
         try:
@@ -533,23 +850,26 @@ class TrainingTrackerApp:
                     sender_member_name = f"{m.get('first_name', '')} {m.get('last_name', '')}".strip()
                     break
             
+            # Get the configured number of months to review for table
+            months_to_review = self.config.pdf_months_to_review
+            
             # Get sessions from last 6 months (for weekend attendance count)
             cutoff_6mo = datetime.now() - timedelta(days=180)
-            # Get sessions from last 3 months (for PDF table)
-            cutoff_3mo = datetime.now() - timedelta(days=90)
+            # Get sessions for the table based on configured months
+            cutoff_table = datetime.now() - timedelta(days=months_to_review * 30) if months_to_review > 0 else None
             all_sessions = self.db.get_all_sessions()
             
-            # Filter sessions to last 6 months and last 3 months
+            # Filter sessions to last 6 months and table period
             sessions_6mo = []
-            sessions_3mo = []
+            sessions_table = []
             for session in all_sessions:
                 try:
                     # NOTE: get_all_sessions renames session_date->date
                     session_date = datetime.strptime(session.get('date', ''), "%m/%d/%Y")
                     if session_date >= cutoff_6mo:
                         sessions_6mo.append(session)
-                    if session_date >= cutoff_3mo:
-                        sessions_3mo.append(session)
+                    if cutoff_table and session_date >= cutoff_table:
+                        sessions_table.append(session)
                 except ValueError:
                     continue
             
@@ -640,11 +960,12 @@ class TrainingTrackerApp:
                 # DEBUG: print(f"DEBUG: Email - Processing member: {member_name} <{email}>")
                 
                 # Generate PDF for this member
-                # Pass 3mo sessions for table, 6mo sessions for counts
+                # Pass table sessions for table, 6mo sessions for counts, and months_to_review
                 pdf_path = self._generate_member_attendance_pdf(
-                    member, sessions_3mo, sessions_6mo, 
+                    member, sessions_table, sessions_6mo, 
                     total_qualifying_sessions, total_optional_sessions,
-                    total_mission_sessions, total_other_sessions
+                    total_mission_sessions, total_other_sessions,
+                    months_to_review
                 )
                 
                 if pdf_path:
@@ -656,10 +977,15 @@ class TrainingTrackerApp:
                         msg['Subject'] = "505 SAR Dogs Attendance Record"
                         
                         # Email body
+                        month_text = "month" if months_to_review == 1 else "months"
+                        if months_to_review > 0:
+                            table_info = f"for the last {months_to_review} {month_text}"
+                        else:
+                            table_info = "(summary only)"
                         body = (
                             f"To: {member_name},\n"
                             f"Re: Training\n\n"
-                            f"Please find attached your training attendance record for the last 3 months.\n\n"
+                            f"Please find attached your training attendance record {table_info}.\n\n"
                             f"Contact me (Secretary) by replying to this email if you think there is an error.\n\n"
                             f"Thank you,\n"
                             f"{sender_member_name}"
@@ -722,19 +1048,21 @@ class TrainingTrackerApp:
         except Exception as e:
             print(f"Error sending emails: {e}")
             
-    def _generate_member_attendance_pdf(self, member: dict, sessions_3mo: list, sessions_6mo: list, 
+    def _generate_member_attendance_pdf(self, member: dict, sessions_table: list, sessions_6mo: list, 
                                           total_qualifying: int, total_optional: int,
-                                          total_mission: int, total_other: int) -> str:
+                                          total_mission: int, total_other: int,
+                                          months_to_review: int = 1) -> str:
         """Generate attendance PDF for a single member.
         
         Args:
             member: Member dictionary
-            sessions_3mo: List of session dictionaries for last 3 months (for table)
+            sessions_table: List of session dictionaries for table (based on months_to_review)
             sessions_6mo: List of session dictionaries for last 6 months (for counts)
             total_qualifying: Total number of qualifying training sessions in last 6 months
             total_optional: Total number of optional training sessions in last 6 months
             total_mission: Total number of missions in last 6 months
             total_other: Total number of other sessions in last 6 months
+            months_to_review: Number of months to show in the table (0 = no table)
             
         Returns:
             Path to generated PDF file, or None on error
@@ -751,7 +1079,7 @@ class TrainingTrackerApp:
             
             # DEBUG: Print member info
             # print(f"DEBUG: PDF - Generating PDF for {member_name} (ID: {member_id})")
-            # print(f"DEBUG: PDF - Sessions for table (3mo): {len(sessions_3mo)}, Sessions for count (6mo): {len(sessions_6mo)}, Total qualifying: {total_qualifying}")
+            # print(f"DEBUG: PDF - Sessions for table: {len(sessions_table)}, Sessions for count (6mo): {len(sessions_6mo)}, Total qualifying: {total_qualifying}")
             
             # Calculate attendance for each session type from 6 month data
             qualifying_attended = 0
@@ -804,57 +1132,60 @@ class TrainingTrackerApp:
             story.append(Paragraph(summary_other, styles['Normal']))
             story.append(Spacer(1, 20))
             
-            # Sort sessions chronologically by date (oldest first)
-            sessions_3mo_sorted = sorted(sessions_3mo, key=lambda s: datetime.strptime(s.get('date', '01/01/2000'), "%m/%d/%Y"))
-            
-            # Build table data from 3 month sessions
-            # NOTE: get_all_sessions renames session_date->date and session_type->type
-            # First row is the header text spanning all columns
-            table_data = [['Recorded sessions over the last three months.', '', '', '']]
-            # Second row is the column headers
-            table_data.append(['Date', 'Location', 'Type', 'Attended'])
-            
-            for session in sessions_3mo_sorted:
-                session_id = session.get('id')
-                attended = self.db.get_attendance_status(session_id, member_id)
-                attended_str = "Yes" if attended else "No"
+            # Only build table if months_to_review > 0 and there are sessions
+            if months_to_review > 0 and sessions_table:
+                # Sort sessions chronologically by date (oldest first)
+                sessions_sorted = sorted(sessions_table, key=lambda s: datetime.strptime(s.get('date', '01/01/2000'), "%m/%d/%Y"))
                 
-                table_data.append([
-                    session.get('date', ''),
-                    session.get('location', ''),
-                    session.get('type', ''),
-                    attended_str
-                ])
-            
-            # DEBUG: Print table data summary
-            # print(f"DEBUG: PDF - Table has {len(table_data)} rows (including header)")
-            # if len(table_data) > 2:
-            #     print(f"DEBUG: PDF - First data row: {table_data[2]}")
-            
-            # Create table
-            table = Table(table_data, colWidths=[80, 150, 100, 60])
-            table.setStyle(TableStyle([
-                # Spanning header row (row 0)
-                ('SPAN', (0, 0), (-1, 0)),
-                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                ('TOPPADDING', (0, 0), (-1, 0), 8),
-                # Column headers row (row 1)
-                ('BACKGROUND', (0, 1), (-1, 1), colors.grey),
-                ('TEXTCOLOR', (0, 1), (-1, 1), colors.whitesmoke),
-                ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 1), (-1, 1), 10),
-                ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
-                # Data rows (row 2+)
-                ('BACKGROUND', (0, 2), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ]))
-            
-            story.append(table)
+                # Build table data
+                # NOTE: get_all_sessions renames session_date->date and session_type->type
+                # First row is the header text spanning all columns
+                month_text = "month" if months_to_review == 1 else "months"
+                table_data = [[f'Recorded sessions over the last {months_to_review} {month_text}.', '', '', '']]
+                # Second row is the column headers
+                table_data.append(['Date', 'Location', 'Type', 'Attended'])
+                
+                for session in sessions_sorted:
+                    session_id = session.get('id')
+                    attended = self.db.get_attendance_status(session_id, member_id)
+                    attended_str = "Yes" if attended else "No"
+                    
+                    table_data.append([
+                        session.get('date', ''),
+                        session.get('location', ''),
+                        session.get('type', ''),
+                        attended_str
+                    ])
+                
+                # DEBUG: Print table data summary
+                # print(f"DEBUG: PDF - Table has {len(table_data)} rows (including header)")
+                # if len(table_data) > 2:
+                #     print(f"DEBUG: PDF - First data row: {table_data[2]}")
+                
+                # Create table
+                table = Table(table_data, colWidths=[80, 150, 100, 60])
+                table.setStyle(TableStyle([
+                    # Spanning header row (row 0)
+                    ('SPAN', (0, 0), (-1, 0)),
+                    ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                    ('TOPPADDING', (0, 0), (-1, 0), 8),
+                    # Column headers row (row 1)
+                    ('BACKGROUND', (0, 1), (-1, 1), colors.grey),
+                    ('TEXTCOLOR', (0, 1), (-1, 1), colors.whitesmoke),
+                    ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 1), (-1, 1), 10),
+                    ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
+                    # Data rows (row 2+)
+                    ('BACKGROUND', (0, 2), (-1, -1), colors.beige),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ]))
+                
+                story.append(table)
             
             # Build PDF
             doc.build(story)
@@ -883,8 +1214,15 @@ class TrainingTrackerApp:
         # Excel Participation File Location section
         self._build_excel_participation_section(main_frame)
         
-        # Email Configuration section
-        self._build_email_config_section(main_frame)
+        # Container for Email Configuration and PDF Presentation side by side
+        email_pdf_frame = ttk.Frame(main_frame)
+        email_pdf_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Email Configuration section (left side)
+        self._build_email_config_section(email_pdf_frame)
+        
+        # PDF Presentation section (right side)
+        # self._build_pdf_presentation_section(email_pdf_frame)
         
         # Default Values section
         self._build_default_values_section(main_frame)
@@ -959,7 +1297,7 @@ class TrainingTrackerApp:
             parent: Parent widget
         """
         frame = ttk.LabelFrame(parent, text="Email Configuration (for monthly attendance reports)", padding=5)
-        frame.pack(fill=tk.X, pady=(0, 10))
+        frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
         
         # Row 1: SMTP Server, Port, Encryption
         row1 = ttk.Frame(frame)
@@ -986,7 +1324,7 @@ class TrainingTrackerApp:
         ttk.Label(row2, text="Sender Email:", width=12).pack(side=tk.LEFT)
         ttk.Entry(row2, textvariable=self.vars.sender_email, width=25).pack(side=tk.LEFT)
         
-        # Row 3: Password
+        # Row 3: Password and Months to Review
         row3 = ttk.Frame(frame)
         row3.pack(fill=tk.X, pady=2)
         
@@ -994,7 +1332,48 @@ class TrainingTrackerApp:
         self.password_entry = ttk.Entry(row3, textvariable=self.vars.sender_password, width=25, show="*")
         self.password_entry.pack(side=tk.LEFT)
         
-        ttk.Label(row3, text="(App Password for Gmail)", font=('TkDefaultFont', 8)).pack(side=tk.LEFT, padx=10)
+        ttk.Label(row3, text="(App Password for Gmail)", font=('TkDefaultFont', 8)).pack(side=tk.LEFT, padx=(10, 20))
+        
+        # ttk.Label(row3, text="Months in PDF:").pack(side=tk.LEFT)
+        # self.pdf_months_spinbox = ttk.Spinbox(
+        #     row3, 
+        #     textvariable=self.vars.pdf_months_to_review, 
+        #     from_=0, 
+        #     to=12, 
+        #     width=6
+        # )
+        # self.pdf_months_spinbox.pack(side=tk.LEFT, padx=(5, 0))
+        
+    # def _build_pdf_presentation_section(self, parent):
+    #     """Build the PDF Presentation section.
+        
+    #     Args:
+    #         parent: Parent widget
+    #     """
+    #     frame = ttk.LabelFrame(parent, text="PDF Presentation", padding=5)
+    #     frame.pack(side=tk.LEFT, fill=tk.BOTH, padx=(5, 0))
+        
+    #     # Review Attendance button
+    #     ttk.Button(
+    #         frame, 
+    #         text="Review Attendance", 
+    #         command=self._on_review_attendance
+    #     ).pack(pady=2, padx=10)
+        
+    def _on_review_attendance(self):
+        """Handle Review Attendance button click - show member selection dialog."""
+        if not self.db.database_exists():
+            messagebox.showwarning("Database Required", 
+                                   "Please initialize the database first (Setup tab).")
+            return
+            
+        members = self.db.get_all_members()
+        if not members:
+            messagebox.showinfo("No Members", "No members found in the database.")
+            return
+        
+        # Show member selection dialog with date range
+        self._show_attendance_review_dialog(members)
         
     def _build_default_values_section(self, parent):
         """Build the Default Values (Optional) section with Training Locations and Certifications.
@@ -1852,6 +2231,7 @@ class TrainingTrackerApp:
         ttk.Button(frame, text="Delete Member", command=self._on_delete_member, width=15).pack(pady=2)
         ttk.Button(frame, text="Clear Form", command=self._on_clear_demographics, width=15).pack(pady=2)
         
+        
     def _build_members_list_section(self, parent):
         """Build the members list treeview section.
         
@@ -1990,6 +2370,26 @@ class TrainingTrackerApp:
         ttk.Button(frame, text="New Session", command=self._on_new_session).pack(side=tk.LEFT, padx=5)
         ttk.Button(frame, text="Delete Session", command=self._on_delete_session).pack(side=tk.LEFT, padx=5)
         ttk.Button(frame, text="Clear Form", command=self._on_clear_session).pack(side=tk.LEFT, padx=5)
+        ttk.Button(frame, text="Modify Date and/or Location", command=self._on_modify_session).pack(side=tk.LEFT, padx=5)
+
+        # Spinbox for months to email on exit
+        self.pdf_months_spinbox = ttk.Spinbox(
+            frame, 
+            textvariable=self.vars.pdf_months_to_review, 
+            from_=0, 
+            to=12, 
+            width=4
+        )
+        self.pdf_months_spinbox.pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Label(frame, text="Months to Review in email PDF:").pack(side=tk.RIGHT)
+
+        # Review Attendance button
+        ttk.Button(
+            frame, 
+            text="Review Attendance", 
+            command=self._on_review_attendance
+        ).pack(side=tk.RIGHT,pady=2, padx=10)
+        
         
     def _build_attendance_section(self, parent):
         """Build the attendance tracking treeview section.
@@ -2597,9 +2997,9 @@ class TrainingTrackerApp:
             response = messagebox.askyesnocancel(
                 "Existing Session Found",
                 f"A {session_type} session already exists for {date_str} at {location}.\n\n"
-                "• Yes - Load the existing session\n"
-                "• No - Create a new session (different location or type)\n"
-                "• Cancel - Clear the date"
+                "\u2022 Yes - Load the existing session\n"
+                "\u2022 No - Create a new session (different location or type)\n"
+                "\u2022 Cancel - Clear the date"
             )
             if response is True:  # Yes - load it
                 self._load_session_data(session)
@@ -2947,6 +3347,117 @@ class TrainingTrackerApp:
         # Update attendance section state (disabled since no date)
         self._update_attendance_section_state()
         
+    def _on_modify_session(self):
+        """Handle Modify Date and/or Location button click.
+        
+        Updates the date and/or location of the currently selected session.
+        """
+        session_id = self.vars.selected_session_id.get()
+        
+        if session_id < 0:
+            messagebox.showwarning("No Session Selected", 
+                                   "Please select an existing session to modify.\n\n"
+                                   "Use the date picker to select a session first.")
+            return
+            
+        if not self.db.database_exists():
+            messagebox.showwarning("Database Required", 
+                                   "Please initialize the database first (Setup tab).")
+            return
+        
+        # Get current form values
+        new_location = self.vars.session_location.get().strip().title()
+        new_date = self.vars.session_date.get().strip()
+        session_type = self.vars.session_type.get()
+        description = self.vars.session_description.get().strip()
+        
+        # Validate required fields
+        if not new_location or not new_date:
+            messagebox.showwarning("Missing Information", 
+                                   "Please enter both Location and Date.")
+            return
+        
+        # Validate date format
+        is_valid, result = ui_support.validate_date(new_date)
+        if not is_valid:
+            messagebox.showwarning("Invalid Date", result)
+            return
+        new_date = result
+        
+        # Get original session info for confirmation message
+        original_session = self.db.get_session(session_id)
+        if not original_session:
+            messagebox.showerror("Error", "Could not find the original session.")
+            return
+        
+        original_date = original_session.get('date', '')
+        original_location = original_session.get('location', '')
+        
+        # Check if anything actually changed
+        if new_date == original_date and new_location == original_location:
+            messagebox.showinfo("No Changes", 
+                               "The date and location are the same as the original.\n"
+                               "No changes were made.")
+            return
+        
+        # Confirm the modification
+        changes = []
+        if new_date != original_date:
+            changes.append(f"Date: {original_date} → {new_date}")
+        if new_location != original_location:
+            changes.append(f"Location: {original_location} → {new_location}")
+        
+        change_text = "\n".join(changes)
+        
+        if not messagebox.askyesno("Confirm Modification",
+                                   f"Modify this session?\n\n{change_text}\n\n"
+                                   "All attendance records will be preserved."):
+            return
+        
+        # Update the UI field to show title case
+        self.vars.session_location.set(new_location)
+        self.vars.session_date.set(new_date)
+        
+        # Auto-add new location to training locations list if needed
+        existing_locations = self.db.get_training_locations()
+        if new_location and new_location not in existing_locations:
+            self.db.add_training_location(new_location)
+            self._refresh_locations_listbox()
+        
+        # Prepare session data for update
+        session_data = {
+            'id': session_id,
+            'location': new_location,
+            'date': new_date,
+            'type': session_type,
+            'description': description,
+        }
+        
+        # Save to database
+        success, updated_id, message = self.db.save_session(session_data)
+        
+        if success:
+            # Track the year(s) as modified for Excel export
+            for date_str in [original_date, new_date]:
+                if date_str:
+                    try:
+                        session_date = datetime.strptime(date_str, "%m/%d/%Y")
+                        self._modified_years.add(session_date.year)
+                    except ValueError:
+                        pass
+            
+            # Refresh session lists
+            self.ui_state.sessions_list = self.db.get_all_sessions()
+            self.refresh_location_combobox()
+            
+            # Mark session as saved
+            self.ui_state.mark_session_saved(self._get_current_session_data())
+            
+            messagebox.showinfo("Session Modified", 
+                               f"Session successfully updated.\n\n{change_text}")
+        else:
+            messagebox.showerror("Modification Failed", message)
+        
     def _on_attendance_double_click(self, event):
         """Handle double-click on attendance treeview to toggle yes/no.
         
@@ -3179,7 +3690,7 @@ def main():
         pass  # If config can't be loaded, splash will center on screen
     
     # Show splash screen centered over saved main window position
-    splash = SplashScreen(root, version="1.0.3-alpha",
+    splash = SplashScreen(root, version="1.0.4-alpha",
                           app_title="Attendance Tracker", 
                           github_url="github.com/agelders2021/attendance-tracker",
                           main_window_geometry=saved_geometry)

@@ -105,6 +105,9 @@ class AppVariables:
         self.sender_password = tk.StringVar()
         self.smtp_encryption = tk.StringVar(value="TLS")
         
+        # Email PDF settings
+        self.pdf_months_to_review = tk.IntVar(value=1)
+        
         # Placeholder for future setup variables
         self.setup_placeholder = tk.StringVar()
         

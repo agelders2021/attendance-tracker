@@ -133,6 +133,17 @@ class DatabaseManager:
                 )
             self.connection.commit()
         
+        # Check if attendance table has updated_at column, add if missing
+        cursor.execute("PRAGMA table_info(attendance)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'updated_at' not in columns:
+            try:
+                # SQLite doesn't allow non-constant defaults in ALTER TABLE, so use NULL
+                cursor.execute("ALTER TABLE attendance ADD COLUMN updated_at TEXT")
+                self.connection.commit()
+            except sqlite3.Error:
+                pass  # Column might already exist or table doesn't exist yet
+        
     def close(self):
         """Close the database connection."""
         if self.connection:
@@ -236,6 +247,7 @@ class DatabaseManager:
                     session_id INTEGER NOT NULL,
                     member_id INTEGER NOT NULL,
                     attended INTEGER DEFAULT 0,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE CASCADE,
                     FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
                     UNIQUE(session_id, member_id)
@@ -686,7 +698,7 @@ class DatabaseManager:
             session_id = session_data.get('id', -1)
             location = session_data.get('location', '').strip()
             session_date = session_data.get('date', '').strip()
-            session_type = session_data.get('type', 'Qualifying Training')
+            session_type = session_data.get('type', 'Weekend')
             description = session_data.get('description', '')
             
             if not location or not session_date:
@@ -706,7 +718,7 @@ class DatabaseManager:
                 conn.commit()
                 message = "Session updated successfully"
             else:
-                # Check if session already exists (same location and date)
+                # Check if session already exists
                 cursor.execute(
                     "SELECT id FROM training_sessions WHERE location = ? AND session_date = ?",
                     (location, session_date)
@@ -930,12 +942,28 @@ class DatabaseManager:
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            cursor.execute('''
-                INSERT INTO attendance (session_id, member_id, attended)
-                VALUES (?, ?, ?)
-                ON CONFLICT(session_id, member_id)
-                DO UPDATE SET attended = excluded.attended
-            ''', (session_id, member_id, 1 if attended else 0))
+            # Try with updated_at column first
+            try:
+                cursor.execute('''
+                    INSERT INTO attendance (session_id, member_id, attended, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(session_id, member_id)
+                    DO UPDATE SET attended = excluded.attended, updated_at = CURRENT_TIMESTAMP
+                ''', (session_id, member_id, 1 if attended else 0))
+            except sqlite3.OperationalError as e:
+                if "no column named updated_at" in str(e):
+                    # Column doesn't exist, add it (with NULL default, SQLite limitation)
+                    cursor.execute("ALTER TABLE attendance ADD COLUMN updated_at TEXT")
+                    conn.commit()
+                    # Retry the insert
+                    cursor.execute('''
+                        INSERT INTO attendance (session_id, member_id, attended, updated_at)
+                        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(session_id, member_id)
+                        DO UPDATE SET attended = excluded.attended, updated_at = CURRENT_TIMESTAMP
+                    ''', (session_id, member_id, 1 if attended else 0))
+                else:
+                    raise
             
             conn.commit()
             return True
@@ -1009,15 +1037,6 @@ class DatabaseManager:
             # Calculate cutoff date
             cutoff_date = datetime.now() - timedelta(days=months * 30)
             
-            # Get all qualifying training sessions in the date range where member attended
-            cursor.execute('''
-                SELECT COUNT(*) FROM attendance a
-                JOIN training_sessions ts ON a.session_id = ts.id
-                WHERE a.member_id = ?
-                AND a.attended = 1
-                AND ts.session_type = 'Qualifying Training'
-            ''', (member_id,))
-            
             # We need to filter by date in Python since date format is MM/DD/YYYY
             cursor.execute('''
                 SELECT ts.session_date FROM attendance a
@@ -1039,7 +1058,7 @@ class DatabaseManager:
             return count
             
         except sqlite3.Error as e:
-            print(f"Error getting qualifying training attendance count: {e}")
+            print(f"Error getting weekend attendance count: {e}")
             return 0
             
     def get_member_attendance_summary(self, session_id: int) -> List[Dict]:
@@ -1339,7 +1358,7 @@ class DatabaseManager:
                 ''', (
                     session.get("location", ""),
                     session.get("session_date", ""),
-                    session.get("session_type", "Qualifying Training"),
+                    session.get("session_type", "Weekend"),
                     session.get("description", "")
                 ))
                 session_id_map[old_id] = cursor.lastrowid
@@ -1383,11 +1402,22 @@ class DatabaseManager:
             cursor.execute("SELECT MAX(updated_at) FROM training_sessions")
             session_time = cursor.fetchone()[0]
             
+            # Check attendance table
+            attendance_time = None
+            try:
+                cursor.execute("SELECT MAX(updated_at) FROM attendance")
+                attendance_time = cursor.fetchone()[0]
+            except sqlite3.Error:
+                # Column may not exist in older databases
+                pass
+            
             times = []
             if member_time:
                 times.append(member_time)
             if session_time:
                 times.append(session_time)
+            if attendance_time:
+                times.append(attendance_time)
                 
             if times:
                 latest = max(times)

@@ -57,6 +57,7 @@ DEFAULT_CONFIG = {
     "sender_email": "",
     "sender_password_encrypted": "",
     "smtp_encryption": "TLS",  # TLS, SSL, or None
+    "pdf_months_to_review": 1,
 }
 
 
@@ -564,6 +565,16 @@ class ConfigManager:
     def smtp_encryption(self, value: str):
         """Set the SMTP encryption type."""
         self._config["smtp_encryption"] = value
+        
+    @property
+    def pdf_months_to_review(self) -> int:
+        """Get the number of months to review in emailed PDF table."""
+        return self._config.get("pdf_months_to_review", 1)
+        
+    @pdf_months_to_review.setter
+    def pdf_months_to_review(self, value: int):
+        """Set the number of months to review in emailed PDF table."""
+        self._config["pdf_months_to_review"] = value
 
 
 # Global configuration manager instance
