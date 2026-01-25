@@ -227,7 +227,7 @@ def get_session_types() -> List[str]:
     Returns:
         List of session type names
     """
-    return ["Qualifying Training", "Optional Training", "Mission", "Other"]
+    return ["Qualifying Training", "Optional Training", "Mission", "Team Meeting", "Other"]
 
 
 def calculate_weekend_sessions_count(sessions: List[Dict], member_id: int) -> int:
@@ -515,6 +515,7 @@ SESSION_COLORS = {
     "Qualifying Training": "#FFFF00",    # Yellow
     "Optional Training": "#87CEEB",    # Light Blue
     "Mission": "#FF6B6B",    # Red
+    "Team Meeting": "#DDA0DD",    # Plum
     "Other": "#90EE90",      # Light Green
 }
 

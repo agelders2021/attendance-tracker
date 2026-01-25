@@ -81,6 +81,9 @@ class TrainingTrackerApp:
         # Flag to prevent duplicate name warning while loading member data
         self._loading_member_data = False
         
+        # Flag to prevent session type change dialog while loading session data
+        self._loading_session_data = False
+        
         # Track which years have had attendance data modified during this session
         self._modified_years: set = set()
         
@@ -357,6 +360,7 @@ class TrainingTrackerApp:
                 'Optional Training': PatternFill('solid', fgColor='ADD8E6'),   # Light blue
                 'Qualifying Training': PatternFill('solid', fgColor='FFFF00'),   # Yellow
                 'Mission': PatternFill('solid', fgColor='FF6B6B'),   # Light red
+                'Team Meeting': PatternFill('solid', fgColor='DDA0DD'),   # Plum
                 'Other': PatternFill('solid', fgColor='90EE90'),     # Light green
             }
             
@@ -691,6 +695,7 @@ class TrainingTrackerApp:
             total_qualifying = sum(1 for s in sessions_in_range if s.get('type') == 'Qualifying Training')
             total_optional = sum(1 for s in sessions_in_range if s.get('type') == 'Optional Training')
             total_mission = sum(1 for s in sessions_in_range if s.get('type') == 'Mission')
+            total_team_meeting = sum(1 for s in sessions_in_range if s.get('type') == 'Team Meeting')
             total_other = sum(1 for s in sessions_in_range if s.get('type') == 'Other')
             
             # Create temp file for combined PDF
@@ -722,6 +727,8 @@ class TrainingTrackerApp:
             story.append(Spacer(1, 6))
             story.append(Paragraph(f"Total Missions: {total_mission}", styles['Normal']))
             story.append(Spacer(1, 6))
+            story.append(Paragraph(f"Total Team Meetings: {total_team_meeting}", styles['Normal']))
+            story.append(Spacer(1, 6))
             story.append(Paragraph(f"Total Other sessions: {total_other}", styles['Normal']))
             story.append(Spacer(1, 20))
             
@@ -733,7 +740,7 @@ class TrainingTrackerApp:
                 return f"{attended} ({percent}%)"
             
             # Build summary table data - calculate attendance for each member
-            summary_table_data = [['Member', 'Qualifying', 'Optional', 'Missions', 'Other']]
+            summary_table_data = [['Member', 'Qualifying\nSessions', 'Optional\nSessions', 'Missions', 'Meetings', 'Other']]
             
             for member in sorted_members:
                 member_id = member.get('id')
@@ -743,6 +750,7 @@ class TrainingTrackerApp:
                 qualifying_attended = 0
                 optional_attended = 0
                 mission_attended = 0
+                team_meeting_attended = 0
                 other_attended = 0
                 
                 for session in sessions_in_range:
@@ -756,6 +764,8 @@ class TrainingTrackerApp:
                             optional_attended += 1
                         elif session_type == 'Mission':
                             mission_attended += 1
+                        elif session_type == 'Team Meeting':
+                            team_meeting_attended += 1
                         elif session_type == 'Other':
                             other_attended += 1
                 
@@ -764,18 +774,21 @@ class TrainingTrackerApp:
                     format_with_percent(qualifying_attended, total_qualifying),
                     format_with_percent(optional_attended, total_optional),
                     format_with_percent(mission_attended, total_mission),
+                    format_with_percent(team_meeting_attended, total_team_meeting),
                     format_with_percent(other_attended, total_other)
                 ])
             
             # Create summary table
-            summary_table = Table(summary_table_data, colWidths=[180, 70, 70, 70, 70])
+            summary_table = Table(summary_table_data, colWidths=[150, 70, 70, 60, 60, 60])
             summary_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('TOPPADDING', (0, 0), (-1, 0), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
                 ('ALIGN', (0, 1), (0, -1), 'LEFT'),  # Member names left-aligned
                 ('ALIGN', (1, 1), (-1, -1), 'CENTER'),  # Numbers centered
                 ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
@@ -798,6 +811,7 @@ class TrainingTrackerApp:
                 qualifying_attended = 0
                 optional_attended = 0
                 mission_attended = 0
+                team_meeting_attended = 0
                 other_attended = 0
                 
                 for session in sessions_in_range:
@@ -811,6 +825,8 @@ class TrainingTrackerApp:
                             optional_attended += 1
                         elif session_type == 'Mission':
                             mission_attended += 1
+                        elif session_type == 'Team Meeting':
+                            team_meeting_attended += 1
                         elif session_type == 'Other':
                             other_attended += 1
                 
@@ -828,6 +844,8 @@ class TrainingTrackerApp:
                 story.append(Paragraph(f"Attended {optional_attended} out of {total_optional} optional training sessions.", styles['Normal']))
                 story.append(Spacer(1, 6))
                 story.append(Paragraph(f"Attended {mission_attended} out of {total_mission} missions.", styles['Normal']))
+                story.append(Spacer(1, 6))
+                story.append(Paragraph(f"Attended {team_meeting_attended} out of {total_team_meeting} team meetings.", styles['Normal']))
                 story.append(Spacer(1, 6))
                 story.append(Paragraph(f"Attended {other_attended} out of {total_other} other sessions.", styles['Normal']))
                 story.append(Spacer(1, 20))
@@ -967,6 +985,7 @@ class TrainingTrackerApp:
             total_qualifying_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Qualifying Training')
             total_optional_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Optional Training')
             total_mission_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Mission')
+            total_team_meeting_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Team Meeting')
             total_other_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Other')
             # DEBUG: print(f"DEBUG: Email - Total qualifying training sessions in 6mo period: {total_qualifying_sessions}")
             
@@ -1044,7 +1063,7 @@ class TrainingTrackerApp:
                 pdf_path = self._generate_member_attendance_pdf(
                     member, sessions_table, sessions_6mo, 
                     total_qualifying_sessions, total_optional_sessions,
-                    total_mission_sessions, total_other_sessions,
+                    total_mission_sessions, total_team_meeting_sessions, total_other_sessions,
                     months_to_review
                 )
                 
@@ -1130,7 +1149,7 @@ class TrainingTrackerApp:
             
     def _generate_member_attendance_pdf(self, member: dict, sessions_table: list, sessions_6mo: list, 
                                           total_qualifying: int, total_optional: int,
-                                          total_mission: int, total_other: int,
+                                          total_mission: int, total_team_meeting: int, total_other: int,
                                           months_to_review: int = 1) -> str:
         """Generate attendance PDF for a single member.
         
@@ -1141,6 +1160,7 @@ class TrainingTrackerApp:
             total_qualifying: Total number of qualifying training sessions in last 6 months
             total_optional: Total number of optional training sessions in last 6 months
             total_mission: Total number of missions in last 6 months
+            total_team_meeting: Total number of team meetings in last 6 months
             total_other: Total number of other sessions in last 6 months
             months_to_review: Number of months to show in the table (0 = no table)
             
@@ -1165,6 +1185,7 @@ class TrainingTrackerApp:
             qualifying_attended = 0
             optional_attended = 0
             mission_attended = 0
+            team_meeting_attended = 0
             other_attended = 0
             
             for session in sessions_6mo:
@@ -1178,6 +1199,8 @@ class TrainingTrackerApp:
                         optional_attended += 1
                     elif session_type == 'Mission':
                         mission_attended += 1
+                    elif session_type == 'Team Meeting':
+                        team_meeting_attended += 1
                     elif session_type == 'Other':
                         other_attended += 1
             
@@ -1206,6 +1229,10 @@ class TrainingTrackerApp:
             
             summary_mission = f"You attended {mission_attended} out of {total_mission} missions in the last 6 months."
             story.append(Paragraph(summary_mission, styles['Normal']))
+            story.append(Spacer(1, 6))
+            
+            summary_team_meeting = f"You attended {team_meeting_attended} out of {total_team_meeting} team meetings in the last 6 months."
+            story.append(Paragraph(summary_team_meeting, styles['Normal']))
             story.append(Spacer(1, 6))
             
             summary_other = f"You attended {other_attended} out of {total_other} other sessions in the last 6 months."
@@ -2415,8 +2442,8 @@ class TrainingTrackerApp:
         self.location_combo.pack(anchor=tk.W)
         
         # Column 3: Session Type (Radio buttons)
-        type_frame = ttk.LabelFrame(row, text="Session Type", padding=5)
-        type_frame.pack(side=tk.LEFT, padx=(0, 20))
+        type_frame = ttk.LabelFrame(row, text="Session Type:", padding=5)
+        type_frame.pack(side=tk.LEFT, padx=(0, 5))
         
         self.session_type_radios = []
         for session_type in ui_support.get_session_types():
@@ -3046,11 +3073,74 @@ class TrainingTrackerApp:
         session_type = self.vars.session_type.get()
         
         # Show/hide description field based on type
-        if session_type in ("Mission", "Other"):
+        if session_type in ("Mission", "Team Meeting", "Other"):
             self.description_frame.pack(fill=tk.X, pady=(5, 0))
         else:
             self.description_frame.pack_forget()
             self.vars.session_description.set("")
+        
+        # Skip the dialog if we're loading session data
+        if self._loading_session_data:
+            return
+        
+        # If editing an existing session, ask whether to update or create new
+        session_id = self.vars.selected_session_id.get()
+        if session_id > 0 and self.db.database_exists():
+            # Get current session data
+            location = self.vars.session_location.get().strip()
+            date_str = self.vars.session_date.get().strip()
+            description = self.vars.session_description.get().strip()
+            
+            if location and date_str:
+                response = messagebox.askyesnocancel(
+                    "Session Type Changed",
+                    f"You changed the session type to '{session_type}'.\n\n"
+                    "• Yes - Update the existing session\n"
+                    "• No - Create a new session with this type\n"
+                    "• Cancel - Revert to previous type"
+                )
+                
+                if response is True:  # Yes - Update existing
+                    session_data = {
+                        'id': session_id,
+                        'location': location,
+                        'date': date_str,
+                        'type': session_type,
+                        'description': description,
+                    }
+                    
+                    success, _, _ = self.db.save_session(session_data)
+                    
+                    if success:
+                        # Track the year as modified for Excel export
+                        try:
+                            session_date = datetime.strptime(date_str, "%m/%d/%Y")
+                            self._modified_years.add(session_date.year)
+                        except ValueError:
+                            pass
+                        
+                        # Refresh session lists
+                        self.ui_state.sessions_list = self.db.get_all_sessions()
+                        
+                elif response is False:  # No - Create new session
+                    # Clear the session ID so it will be saved as a new session
+                    self.vars.selected_session_id.set(-1)
+                    self.ui_state.is_editing_session = False
+                    # Description is cleared for new session unless it's a type that uses it
+                    if session_type not in ("Mission", "Team Meeting", "Other"):
+                        self.vars.session_description.set("")
+                    
+                else:  # Cancel - Revert
+                    # Get the original session type from database
+                    original_session = self.db.get_session(session_id)
+                    if original_session:
+                        original_type = original_session.get('type', 'Qualifying Training')
+                        self.vars.session_type.set(original_type)
+                        # Update description field visibility for original type
+                        if original_type in ("Mission", "Team Meeting", "Other"):
+                            self.description_frame.pack(fill=tk.X, pady=(5, 0))
+                        else:
+                            self.description_frame.pack_forget()
             
     def _check_and_load_existing_session(self, date_str: str):
         """Check if there are existing sessions on the date and inform the user.
@@ -3175,6 +3265,9 @@ class TrainingTrackerApp:
         Args:
             session: Dictionary containing session data
         """
+        # Set flag to prevent session type change dialog while loading
+        self._loading_session_data = True
+        
         self.vars.session_location.set(session.get('location', ''))
         self.vars.session_date.set(session.get('date', ''))
         self.vars.session_type.set(session.get('type', 'Qualifying Training'))
@@ -3183,6 +3276,9 @@ class TrainingTrackerApp:
         
         # Update description field visibility
         self._on_session_type_changed()
+        
+        # Clear the loading flag
+        self._loading_session_data = False
         
         # Load attendance data from database
         session_id = session.get('id', -1)
