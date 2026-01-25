@@ -704,12 +704,92 @@ class TrainingTrackerApp:
             # Format date range for display
             date_range_str = f"{start_date.strftime('%m/%d/%Y')} to {end_date.strftime('%m/%d/%Y')}"
             
-            # Generate pages for each selected member (sorted by last name, first name)
+            # Sort members by last name, first name
             sorted_members = sorted(selected_members, key=lambda m: (m.get('last_name', '').lower(), m.get('first_name', '').lower()))
             
-            for i, member in enumerate(sorted_members):
-                if i > 0:
-                    story.append(PageBreak())
+            # ============================================================
+            # Summary Page - All Members Overview
+            # ============================================================
+            story.append(Paragraph("505 SAR Dogs Attendance Summary", styles['Title']))
+            story.append(Spacer(1, 12))
+            story.append(Paragraph(f"Period: {date_range_str}", styles['Normal']))
+            story.append(Spacer(1, 20))
+            
+            # Session totals sentences
+            story.append(Paragraph(f"Total Qualifying Training sessions: {total_qualifying}", styles['Normal']))
+            story.append(Spacer(1, 6))
+            story.append(Paragraph(f"Total Optional Training sessions: {total_optional}", styles['Normal']))
+            story.append(Spacer(1, 6))
+            story.append(Paragraph(f"Total Missions: {total_mission}", styles['Normal']))
+            story.append(Spacer(1, 6))
+            story.append(Paragraph(f"Total Other sessions: {total_other}", styles['Normal']))
+            story.append(Spacer(1, 20))
+            
+            # Helper function to format count with percentage
+            def format_with_percent(attended, total):
+                if total == 0:
+                    return "0 (0%)"
+                percent = int(round(attended / total * 100))
+                return f"{attended} ({percent}%)"
+            
+            # Build summary table data - calculate attendance for each member
+            summary_table_data = [['Member', 'Qualifying', 'Optional', 'Missions', 'Other']]
+            
+            for member in sorted_members:
+                member_id = member.get('id')
+                member_name = f"{member.get('last_name', '')}, {member.get('first_name', '')}"
+                
+                # Calculate attendance for each session type
+                qualifying_attended = 0
+                optional_attended = 0
+                mission_attended = 0
+                other_attended = 0
+                
+                for session in sessions_in_range:
+                    session_id = session.get('id')
+                    attended = self.db.get_attendance_status(session_id, member_id)
+                    session_type = session.get('type', '')
+                    if attended:
+                        if session_type == 'Qualifying Training':
+                            qualifying_attended += 1
+                        elif session_type == 'Optional Training':
+                            optional_attended += 1
+                        elif session_type == 'Mission':
+                            mission_attended += 1
+                        elif session_type == 'Other':
+                            other_attended += 1
+                
+                summary_table_data.append([
+                    member_name,
+                    format_with_percent(qualifying_attended, total_qualifying),
+                    format_with_percent(optional_attended, total_optional),
+                    format_with_percent(mission_attended, total_mission),
+                    format_with_percent(other_attended, total_other)
+                ])
+            
+            # Create summary table
+            summary_table = Table(summary_table_data, colWidths=[180, 70, 70, 70, 70])
+            summary_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('ALIGN', (0, 1), (0, -1), 'LEFT'),  # Member names left-aligned
+                ('ALIGN', (1, 1), (-1, -1), 'CENTER'),  # Numbers centered
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ]))
+            
+            story.append(summary_table)
+            
+            # ============================================================
+            # Individual Member Pages
+            # ============================================================
+            for member in sorted_members:
+                story.append(PageBreak())
                     
                 member_id = member.get('id')
                 member_name = f"{member.get('first_name', '')} {member.get('last_name', '')}"
@@ -3403,9 +3483,9 @@ class TrainingTrackerApp:
         # Confirm the modification
         changes = []
         if new_date != original_date:
-            changes.append(f"Date: {original_date} → {new_date}")
+            changes.append(f"Date: {original_date} â†’ {new_date}")
         if new_location != original_location:
-            changes.append(f"Location: {original_location} → {new_location}")
+            changes.append(f"Location: {original_location} â†’ {new_location}")
         
         change_text = "\n".join(changes)
         
