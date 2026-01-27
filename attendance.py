@@ -830,8 +830,8 @@ class TrainingTrackerApp:
                     format_with_percent(other_attended, total_other)
                 ])
             
-            # Create summary table
-            summary_table = Table(summary_table_data, colWidths=[150, 70, 70, 60, 60, 60])
+            # Create summary table with repeatRows=1 to repeat header on page breaks
+            summary_table = Table(summary_table_data, colWidths=[150, 70, 70, 60, 60, 60], repeatRows=1)
             summary_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -933,7 +933,7 @@ class TrainingTrackerApp:
                             attended_str
                         ])
                     
-                    table = Table(table_data, colWidths=[80, 150, 100, 60])
+                    table = Table(table_data, colWidths=[80, 150, 100, 60], repeatRows=2)
                     table.setStyle(TableStyle([
                         ('SPAN', (0, 0), (-1, 0)),
                         ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
@@ -1345,8 +1345,8 @@ class TrainingTrackerApp:
                 # if len(table_data) > 2:
                 #     print(f"DEBUG: PDF - First data row: {table_data[2]}")
                 
-                # Create table
-                table = Table(table_data, colWidths=[80, 150, 100, 60])
+                # Create table with repeatRows=2 to repeat header rows on page breaks
+                table = Table(table_data, colWidths=[80, 150, 100, 60], repeatRows=2)
                 table.setStyle(TableStyle([
                     # Spanning header row (row 0)
                     ('SPAN', (0, 0), (-1, 0)),
