@@ -227,24 +227,24 @@ def get_session_types() -> List[str]:
     Returns:
         List of session type names
     """
-    return ["Qualifying Training", "Optional Training", "Mission", "Team Meeting", "Other"]
+    return ["Weekend Training", "Weeknight Training", "Mission", "Team Meeting", "Other"]
 
 
 def calculate_weekend_sessions_count(sessions: List[Dict], member_id: int) -> int:
-    """Calculate the number of qualifying training sessions a member attended in the last 6 months.
+    """Calculate the number of weekend training sessions a member attended in the last 6 months.
     
     Args:
         sessions: List of session dictionaries with attendance data
         member_id: ID of the member to check
         
     Returns:
-        Count of qualifying training sessions attended
+        Count of weekend training sessions attended
     """
     six_months_ago = datetime.now() - timedelta(days=180)
     count = 0
     
     for session in sessions:
-        if session.get("type") == "Qualifying Training":
+        if session.get("type") == "Weekend Training":
             try:
                 session_date = datetime.strptime(session.get("date", ""), DATE_FORMAT)
                 if session_date >= six_months_ago:
@@ -256,6 +256,38 @@ def calculate_weekend_sessions_count(sessions: List[Dict], member_id: int) -> in
                 continue
     
     return count
+
+
+# ============================================================
+# Member Status Helper Functions
+# ============================================================
+
+def get_member_statuses() -> List[str]:
+    """Get the list of member statuses.
+    
+    Returns:
+        List of member status names
+    """
+    return ["Member", "Candidate", "Guest"]
+
+
+def get_status_sort_order(status: str) -> int:
+    """Get the sort order for a member status.
+    
+    Members sort first, then Candidates, then Guests.
+    
+    Args:
+        status: Member status string
+        
+    Returns:
+        Sort order integer (0=Member, 1=Candidate, 2=Guest, 3=unknown)
+    """
+    status_order = {
+        "Member": 0,
+        "Candidate": 1,
+        "Guest": 2
+    }
+    return status_order.get(status, 3)
 
 
 # ============================================================
@@ -272,6 +304,34 @@ def sort_members_by_last_name(members: List[Dict]) -> List[Dict]:
         Sorted list of members
     """
     return sorted(members, key=lambda x: x.get("last_name", "").lower())
+
+
+def sort_members_by_status_then_name(members: List[Dict], sort_by_first: bool = False) -> List[Dict]:
+    """Sort a list of members by status first, then by name.
+    
+    Members sort first, then Candidates, then Guests.
+    Within each status group, sort alphabetically by name.
+    
+    Args:
+        members: List of member dictionaries
+        sort_by_first: If True, sort by first name within status group;
+                       if False, sort by last name
+        
+    Returns:
+        Sorted list of members
+    """
+    if sort_by_first:
+        return sorted(members, key=lambda x: (
+            get_status_sort_order(x.get("member_status", "Member")),
+            x.get("first_name", "").lower(),
+            x.get("last_name", "").lower()
+        ))
+    else:
+        return sorted(members, key=lambda x: (
+            get_status_sort_order(x.get("member_status", "Member")),
+            x.get("last_name", "").lower(),
+            x.get("first_name", "").lower()
+        ))
 
 
 def format_member_display_name(first_name: str, last_name: str) -> str:
@@ -464,7 +524,7 @@ class UIState:
         location = current_data.get('location', '').strip()
         date = current_data.get('date', '').strip()
         description = current_data.get('description', '').strip()
-        session_type = current_data.get('type', 'Qualifying Training')
+        session_type = current_data.get('type', 'Weekend Training')
         
         # If no saved state, check if form has meaningful content
         if not self.last_saved_session_data:
@@ -478,7 +538,7 @@ class UIState:
         saved_location = self.last_saved_session_data.get('location', '').strip()
         saved_date = self.last_saved_session_data.get('date', '').strip()
         saved_description = self.last_saved_session_data.get('description', '').strip()
-        saved_type = self.last_saved_session_data.get('type', 'Qualifying Training')
+        saved_type = self.last_saved_session_data.get('type', 'Weekend Training')
         
         # Check each field for changes
         if location != saved_location:
@@ -512,8 +572,8 @@ def get_ui_state() -> UIState:
 
 # Session type colors for calendar highlighting
 SESSION_COLORS = {
-    "Qualifying Training": "#FFFF00",    # Yellow
-    "Optional Training": "#87CEEB",    # Light Blue
+    "Weekend Training": "#FFFF00",    # Yellow
+    "Weeknight Training": "#87CEEB",    # Light Blue
     "Mission": "#FF6B6B",    # Red
     "Team Meeting": "#DDA0DD",    # Plum
     "Other": "#90EE90",      # Light Green
@@ -523,8 +583,8 @@ SESSION_COLORS = {
 class TrainingDateEntry(DateEntry if TKCALENDAR_AVAILABLE else object):
     """Custom DateEntry that highlights past training sessions by type.
     
-    - Qualifying Training sessions: Yellow
-    - Optional Training sessions: Blue
+    - Weekend Training sessions: Yellow
+    - Weeknight Training sessions: Blue
     - Mission sessions: Red
     - Other sessions: Green
     """
@@ -658,12 +718,12 @@ def suggest_session_type(date_str: str) -> str:
         date_str: Date in MM/DD/YYYY format
         
     Returns:
-        'Qualifying Training' or 'Optional Training' based on the date
+        'Weekend Training' or 'Weeknight Training' based on the date
     """
     is_weekend = is_weekend_date(date_str)
     if is_weekend is None:
-        return "Qualifying Training"  # Default
-    return "Qualifying Training" if is_weekend else "Optional Training"
+        return "Weekend Training"  # Default
+    return "Weekend Training" if is_weekend else "Weeknight Training"
 
 
 def get_unique_locations(sessions: List[Dict]) -> List[str]:

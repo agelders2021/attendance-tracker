@@ -357,8 +357,8 @@ class TrainingTrackerApp:
             
             # Define fill colors for session types (header cells only)
             fills = {
-                'Optional Training': PatternFill('solid', fgColor='ADD8E6'),   # Light blue
-                'Qualifying Training': PatternFill('solid', fgColor='FFFF00'),   # Yellow
+                'Weeknight Training': PatternFill('solid', fgColor='ADD8E6'),   # Light blue
+                'Weekend Training': PatternFill('solid', fgColor='FFFF00'),   # Yellow
                 'Mission': PatternFill('solid', fgColor='FF6B6B'),   # Light red
                 'Team Meeting': PatternFill('solid', fgColor='DDA0DD'),   # Plum
                 'Other': PatternFill('solid', fgColor='90EE90'),     # Light green
@@ -436,7 +436,7 @@ class TrainingTrackerApp:
                         # Format as M/D (no year, no leading zeros)
                         date_short = f"{parsed_date.month}/{parsed_date.day}"
                         location = session.get('location', '')
-                        session_type = session.get('type', 'Qualifying Training')
+                        session_type = session.get('type', 'Weekend Training')
                         header_text = f"{date_short} {location}"
                         
                         cell = ws.cell(row=2, column=col, value=header_text)
@@ -507,7 +507,7 @@ class TrainingTrackerApp:
         """
         dialog = tk.Toplevel(self.root)
         dialog.title("Review Attendance")
-        dialog.geometry("450x550")
+        dialog.geometry("500x600")
         dialog.transient(self.root)
         dialog.grab_set()
         
@@ -570,26 +570,78 @@ class TrainingTrackerApp:
         listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=listbox.yview)
         
-        # Populate listbox with members (sorted by last name)
+        # Sort members by status first, then by name
+        sorted_members = ui_support.sort_members_by_status_then_name(members, sort_by_first=False)
+        
+        # Populate listbox with members, track indices by status
         member_map = {}
-        sorted_members = sorted(members, key=lambda m: (m.get('last_name', '').lower(), m.get('first_name', '').lower()))
-        for member in sorted_members:
-            display_name = f"{member.get('last_name', '')}, {member.get('first_name', '')}"
+        member_indices = []  # List of (index, member) tuples
+        status_indices = {'Member': [], 'Candidate': [], 'Guest': []}
+        
+        for i, member in enumerate(sorted_members):
+            status = member.get('member_status', 'Member')
+            display_name = f"{member.get('last_name', '')}, {member.get('first_name', '')} ({status})"
             listbox.insert(tk.END, display_name)
             member_map[display_name] = member
+            member_indices.append((i, member))
+            if status in status_indices:
+                status_indices[status].append(i)
         
-        # Select All / Deselect All buttons
+        # Selection button states (for toggle functionality)
+        button_states = {
+            'all': False,  # False = Select All, True = Deselect All
+            'Member': False,
+            'Candidate': False,
+            'Guest': False
+        }
+        
+        # Selection buttons frame
         select_frame = ttk.Frame(member_frame)
         select_frame.pack(fill=tk.X, pady=5)
         
-        def select_all():
-            listbox.select_set(0, tk.END)
-            
-        def deselect_all():
-            listbox.select_clear(0, tk.END)
+        def toggle_all():
+            if not button_states['all']:
+                listbox.select_set(0, tk.END)
+                select_all_btn.config(text="Deselect All")
+                button_states['all'] = True
+            else:
+                listbox.select_clear(0, tk.END)
+                select_all_btn.config(text="Select All")
+                button_states['all'] = False
+                # Reset all status buttons
+                for status in ['Member', 'Candidate', 'Guest']:
+                    button_states[status] = False
+                select_members_btn.config(text="Select Members")
+                select_candidates_btn.config(text="Select Candidates")
+                select_guests_btn.config(text="Select Guests")
         
-        ttk.Button(select_frame, text="Select All", command=select_all).pack(side=tk.LEFT, padx=5)
-        ttk.Button(select_frame, text="Deselect All", command=deselect_all).pack(side=tk.LEFT, padx=5)
+        def toggle_status(status, button):
+            indices = status_indices.get(status, [])
+            if not button_states[status]:
+                for idx in indices:
+                    listbox.select_set(idx)
+                button.config(text=f"Deselect {status}s")
+                button_states[status] = True
+            else:
+                for idx in indices:
+                    listbox.select_clear(idx)
+                button.config(text=f"Select {status}s")
+                button_states[status] = False
+        
+        select_all_btn = ttk.Button(select_frame, text="Select All", command=toggle_all)
+        select_all_btn.pack(side=tk.LEFT, padx=5)
+        
+        select_members_btn = ttk.Button(select_frame, text="Select Members", 
+                                         command=lambda: toggle_status('Member', select_members_btn))
+        select_members_btn.pack(side=tk.LEFT, padx=5)
+        
+        select_candidates_btn = ttk.Button(select_frame, text="Select Candidates", 
+                                            command=lambda: toggle_status('Candidate', select_candidates_btn))
+        select_candidates_btn.pack(side=tk.LEFT, padx=5)
+        
+        select_guests_btn = ttk.Button(select_frame, text="Select Guests", 
+                                        command=lambda: toggle_status('Guest', select_guests_btn))
+        select_guests_btn.pack(side=tk.LEFT, padx=5)
         
         # Button frame
         btn_frame = ttk.Frame(dialog)
@@ -692,8 +744,8 @@ class TrainingTrackerApp:
                 return
             
             # Count totals for the date range
-            total_qualifying = sum(1 for s in sessions_in_range if s.get('type') == 'Qualifying Training')
-            total_optional = sum(1 for s in sessions_in_range if s.get('type') == 'Optional Training')
+            total_qualifying = sum(1 for s in sessions_in_range if s.get('type') == 'Weekend Training')
+            total_optional = sum(1 for s in sessions_in_range if s.get('type') == 'Weeknight Training')
             total_mission = sum(1 for s in sessions_in_range if s.get('type') == 'Mission')
             total_team_meeting = sum(1 for s in sessions_in_range if s.get('type') == 'Team Meeting')
             total_other = sum(1 for s in sessions_in_range if s.get('type') == 'Other')
@@ -721,9 +773,9 @@ class TrainingTrackerApp:
             story.append(Spacer(1, 20))
             
             # Session totals sentences
-            story.append(Paragraph(f"Total Qualifying Training sessions: {total_qualifying}", styles['Normal']))
+            story.append(Paragraph(f"Total Weekend Training sessions: {total_qualifying}", styles['Normal']))
             story.append(Spacer(1, 6))
-            story.append(Paragraph(f"Total Optional Training sessions: {total_optional}", styles['Normal']))
+            story.append(Paragraph(f"Total Weeknight Training sessions: {total_optional}", styles['Normal']))
             story.append(Spacer(1, 6))
             story.append(Paragraph(f"Total Missions: {total_mission}", styles['Normal']))
             story.append(Spacer(1, 6))
@@ -740,7 +792,7 @@ class TrainingTrackerApp:
                 return f"{attended} ({percent}%)"
             
             # Build summary table data - calculate attendance for each member
-            summary_table_data = [['Member', 'Qualifying\nSessions', 'Optional\nSessions', 'Missions', 'Meetings', 'Other']]
+            summary_table_data = [['Member', 'Weekend\nSessions', 'Weeknight\nSessions', 'Missions', 'Meetings', 'Other']]
             
             for member in sorted_members:
                 member_id = member.get('id')
@@ -758,9 +810,9 @@ class TrainingTrackerApp:
                     attended = self.db.get_attendance_status(session_id, member_id)
                     session_type = session.get('type', '')
                     if attended:
-                        if session_type == 'Qualifying Training':
+                        if session_type == 'Weekend Training':
                             qualifying_attended += 1
-                        elif session_type == 'Optional Training':
+                        elif session_type == 'Weeknight Training':
                             optional_attended += 1
                         elif session_type == 'Mission':
                             mission_attended += 1
@@ -819,9 +871,9 @@ class TrainingTrackerApp:
                     attended = self.db.get_attendance_status(session_id, member_id)
                     session_type = session.get('type', '')
                     if attended:
-                        if session_type == 'Qualifying Training':
+                        if session_type == 'Weekend Training':
                             qualifying_attended += 1
-                        elif session_type == 'Optional Training':
+                        elif session_type == 'Weeknight Training':
                             optional_attended += 1
                         elif session_type == 'Mission':
                             mission_attended += 1
@@ -839,9 +891,9 @@ class TrainingTrackerApp:
                 story.append(Spacer(1, 12))
                 
                 # Summary lines
-                story.append(Paragraph(f"Attended {qualifying_attended} out of {total_qualifying} qualifying training sessions.", styles['Normal']))
+                story.append(Paragraph(f"Attended {qualifying_attended} out of {total_qualifying} weekend training sessions.", styles['Normal']))
                 story.append(Spacer(1, 6))
-                story.append(Paragraph(f"Attended {optional_attended} out of {total_optional} optional training sessions.", styles['Normal']))
+                story.append(Paragraph(f"Attended {optional_attended} out of {total_optional} weeknight training sessions.", styles['Normal']))
                 story.append(Spacer(1, 6))
                 story.append(Paragraph(f"Attended {mission_attended} out of {total_mission} missions.", styles['Normal']))
                 story.append(Spacer(1, 6))
@@ -862,10 +914,22 @@ class TrainingTrackerApp:
                         attended = self.db.get_attendance_status(session_id, member_id)
                         attended_str = "Yes" if attended else "No"
                         
+                        # Convert old session type names to new names for display
+                        # For 'Other' type, use the description instead
+                        session_type = session.get('type', '')
+                        if session_type == 'Qualifying Training':
+                            session_type = 'Weekend Training'
+                        elif session_type == 'Optional Training':
+                            session_type = 'Weeknight Training'
+                        elif session_type == 'Other':
+                            description = session.get('description', '').strip()
+                            if description:
+                                session_type = description
+                        
                         table_data.append([
                             session.get('date', ''),
                             session.get('location', ''),
-                            session.get('type', ''),
+                            session_type,
                             attended_str
                         ])
                     
@@ -982,8 +1046,8 @@ class TrainingTrackerApp:
                 
             # Count total qualifying training sessions in last 6 months
             # NOTE: get_all_sessions renames session_type->type
-            total_qualifying_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Qualifying Training')
-            total_optional_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Optional Training')
+            total_qualifying_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Weekend Training')
+            total_optional_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Weeknight Training')
             total_mission_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Mission')
             total_team_meeting_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Team Meeting')
             total_other_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Other')
@@ -1193,9 +1257,9 @@ class TrainingTrackerApp:
                 attended = self.db.get_attendance_status(session_id, member_id)
                 session_type = session.get('type', '')
                 if attended:
-                    if session_type == 'Qualifying Training':
+                    if session_type == 'Weekend Training':
                         qualifying_attended += 1
-                    elif session_type == 'Optional Training':
+                    elif session_type == 'Weeknight Training':
                         optional_attended += 1
                     elif session_type == 'Mission':
                         mission_attended += 1
@@ -1204,7 +1268,7 @@ class TrainingTrackerApp:
                     elif session_type == 'Other':
                         other_attended += 1
             
-            # DEBUG: print(f"DEBUG: PDF - Member attended {qualifying_attended} qualifying training sessions in 6mo")
+            # DEBUG: print(f"DEBUG: PDF - Member attended {qualifying_attended} weekend training sessions in 6mo")
             
             # Create temp file
             fd, pdf_path = tempfile.mkstemp(suffix='.pdf')
@@ -1219,11 +1283,11 @@ class TrainingTrackerApp:
             story.append(Spacer(1, 12))
             
             # Summary lines (moved above table)
-            summary_qualifying = f"You attended {qualifying_attended} out of {total_qualifying} qualifying training sessions in the last 6 months."
+            summary_qualifying = f"You attended {qualifying_attended} out of {total_qualifying} weekend training sessions in the last 6 months."
             story.append(Paragraph(summary_qualifying, styles['Normal']))
             story.append(Spacer(1, 6))
             
-            summary_optional = f"You attended {optional_attended} out of {total_optional} optional training sessions in the last 6 months."
+            summary_optional = f"You attended {optional_attended} out of {total_optional} weeknight training sessions in the last 6 months."
             story.append(Paragraph(summary_optional, styles['Normal']))
             story.append(Spacer(1, 6))
             
@@ -1257,10 +1321,22 @@ class TrainingTrackerApp:
                     attended = self.db.get_attendance_status(session_id, member_id)
                     attended_str = "Yes" if attended else "No"
                     
+                    # Convert old session type names to new names for display
+                    # For 'Other' type, use the description instead
+                    session_type = session.get('type', '')
+                    if session_type == 'Qualifying Training':
+                        session_type = 'Weekend Training'
+                    elif session_type == 'Optional Training':
+                        session_type = 'Weeknight Training'
+                    elif session_type == 'Other':
+                        description = session.get('description', '').strip()
+                        if description:
+                            session_type = description
+                    
                     table_data.append([
                         session.get('date', ''),
                         session.get('location', ''),
-                        session.get('type', ''),
+                        session_type,
                         attended_str
                     ])
                 
@@ -1990,7 +2066,7 @@ class TrainingTrackerApp:
         self._build_personal_info_section(form_frame)
         self._build_contact_info_section(form_frame)
         self._build_emergency_contact_section(form_frame)
-        self._build_additional_info_section(form_frame)
+        # Note: Ham Callsign and Mission Eligible are now in _build_personal_info_section
         
         # Members list treeview (moved above certifications)
         self._build_members_list_section(main_container)
@@ -2024,7 +2100,7 @@ class TrainingTrackerApp:
         frame = ttk.Frame(parent)
         frame.pack(fill=tk.X, pady=5)
         
-        # Row 1: Last Name (combobox), First Name
+        # Row 1: Last Name (combobox), First Name, Ham Callsign
         row1 = ttk.Frame(frame)
         row1.pack(fill=tk.X, pady=2)
         
@@ -2035,7 +2111,12 @@ class TrainingTrackerApp:
         
         ttk.Label(row1, text="First Name:", width=15).pack(side=tk.LEFT)
         first_name_entry = tk.Entry(row1, textvariable=self.vars.first_name, width=25)
-        first_name_entry.pack(side=tk.LEFT)
+        first_name_entry.pack(side=tk.LEFT, padx=(0, 20))
+        
+        ttk.Label(row1, text="Ham Callsign:", width=12).pack(side=tk.LEFT)
+        self.callsign_entry = tk.Entry(row1, textvariable=self.vars.ham_callsign, width=15)
+        self.callsign_entry.pack(side=tk.LEFT)
+        self.demographics_entry_widgets.append(self.callsign_entry)
         
         # Row 2: Address
         row2 = ttk.Frame(frame)
@@ -2046,6 +2127,35 @@ class TrainingTrackerApp:
         self.address_entry.pack(side=tk.LEFT)
         self.demographics_entry_widgets.append(self.address_entry)
         
+        # Row 3: Status radiobuttons (Member/Candidate/Guest) and Mission Eligible checkbox
+        row3 = ttk.Frame(frame)
+        row3.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(row3, text="Status:", width=15).pack(side=tk.LEFT)
+        
+        # Status radiobuttons
+        self.status_radios = []
+        for status in ui_support.get_member_statuses():
+            rb = ttk.Radiobutton(
+                row3,
+                text=status,
+                variable=self.vars.member_status,
+                value=status,
+                command=self._on_member_status_changed
+            )
+            rb.pack(side=tk.LEFT, padx=5)
+            self.status_radios.append(rb)
+            self.demographics_entry_widgets.append(rb)
+        
+        # Mission Eligible checkbox (to the right of status radiobuttons)
+        self.mission_check = ttk.Checkbutton(
+            row3, 
+            text="Mission Eligible",
+            variable=self.vars.mission_eligible
+        )
+        self.mission_check.pack(side=tk.LEFT, padx=20)
+        self.demographics_entry_widgets.append(self.mission_check)
+        
     def _build_contact_info_section(self, parent):
         """Build the contact information section.
         
@@ -2055,7 +2165,7 @@ class TrainingTrackerApp:
         frame = ttk.LabelFrame(parent, text="Contact Information", padding=5)
         frame.pack(fill=tk.X, pady=5)
         
-        # Row 1: Cell Phone, Home Phone
+        # Row 1: Cell Phone, Email (swapped - Email moved up from Row 2)
         row1 = ttk.Frame(frame)
         row1.pack(fill=tk.X, pady=2)
         
@@ -2065,20 +2175,20 @@ class TrainingTrackerApp:
         self.cell_entry.bind('<FocusOut>', self._on_phone_focus_out)
         self.demographics_entry_widgets.append(self.cell_entry)
         
-        ttk.Label(row1, text="Home Phone:", width=15).pack(side=tk.LEFT)
-        self.home_entry = tk.Entry(row1, textvariable=self.vars.home_phone, width=20)
-        self.home_entry.pack(side=tk.LEFT)
-        self.home_entry.bind('<FocusOut>', self._on_phone_focus_out)
-        self.demographics_entry_widgets.append(self.home_entry)
+        ttk.Label(row1, text="Email:", width=15).pack(side=tk.LEFT)
+        self.email_entry = tk.Entry(row1, textvariable=self.vars.email, width=30)
+        self.email_entry.pack(side=tk.LEFT)
+        self.demographics_entry_widgets.append(self.email_entry)
         
-        # Row 2: Email, Alternate Email
+        # Row 2: Home Phone, Alternate Email (swapped - Home Phone moved down from Row 1)
         row2 = ttk.Frame(frame)
         row2.pack(fill=tk.X, pady=2)
         
-        ttk.Label(row2, text="Email:", width=15).pack(side=tk.LEFT)
-        self.email_entry = tk.Entry(row2, textvariable=self.vars.email, width=30)
-        self.email_entry.pack(side=tk.LEFT, padx=(0, 20))
-        self.demographics_entry_widgets.append(self.email_entry)
+        ttk.Label(row2, text="Home Phone:", width=15).pack(side=tk.LEFT)
+        self.home_entry = tk.Entry(row2, textvariable=self.vars.home_phone, width=20)
+        self.home_entry.pack(side=tk.LEFT, padx=(0, 20))
+        self.home_entry.bind('<FocusOut>', self._on_phone_focus_out)
+        self.demographics_entry_widgets.append(self.home_entry)
         
         ttk.Label(row2, text="Alternate Email:", width=15).pack(side=tk.LEFT)
         self.alt_email_entry = tk.Entry(row2, textvariable=self.vars.alternate_email, width=30)
@@ -2529,18 +2639,21 @@ class TrainingTrackerApp:
         ttk.Radiobutton(sort_frame, text="First Name", variable=self.attendance_sort_var, 
                         value="first", command=self._on_attendance_sort_changed).pack(side=tk.LEFT, padx=2)
         
-        # Create treeview with columns
-        columns = ("name", "attended", "weekend_count")
+        # Create treeview with columns (Status added, weekend_count commented out)
+        columns = ("name", "status", "attended")
+        # COMMENTED OUT: columns = ("name", "status", "attended", "weekend_count")
         self.attendance_tree = ttk.Treeview(self.attendance_frame, columns=columns, show="headings", height=12)
         
         # Configure columns
         self.attendance_tree.heading("name", text="Name")
+        self.attendance_tree.heading("status", text="Status")
         self.attendance_tree.heading("attended", text="Attended")
-        self.attendance_tree.heading("weekend_count", text="Qualifying Training Last 6 mo")
+        # COMMENTED OUT: self.attendance_tree.heading("weekend_count", text="Weekend Training Last 6 mo")
         
         self.attendance_tree.column("name", width=200, anchor=tk.W)
+        self.attendance_tree.column("status", width=80, anchor=tk.CENTER)
         self.attendance_tree.column("attended", width=100, anchor=tk.CENTER)
-        self.attendance_tree.column("weekend_count", width=200, anchor=tk.CENTER)
+        # COMMENTED OUT: self.attendance_tree.column("weekend_count", width=200, anchor=tk.CENTER)
         
         # Configure alternating row colors
         self.attendance_tree.tag_configure('oddrow', background='#f0f0f0')
@@ -2686,6 +2799,25 @@ class TrainingTrackerApp:
         if self.vars.mission_eligible.get():
             return False
         return True
+    
+    def _on_member_status_changed(self):
+        """Handle member status radiobutton change.
+        
+        Auto-saves the status if a member is currently being edited.
+        """
+        member_id = self.vars.selected_member_id.get()
+        
+        if member_id > 0 and self.db.database_exists():
+            # Auto-save the status change
+            member = self.db.get_member(member_id)
+            if member:
+                member['member_status'] = self.vars.member_status.get()
+                self.db.save_member(member)
+                
+                # Refresh the members list and attendance tree to show updated status
+                self.ui_state.members_list = self.db.get_all_members()
+                self._refresh_members_tree()
+                self._refresh_attendance_tree()
                 
     def _on_new_member(self):
         """Handle New Member button click."""
@@ -2739,6 +2871,7 @@ class TrainingTrackerApp:
             'emergency_contact_phone': self.vars.emergency_contact_phone.get().strip(),
             'ham_callsign': self.vars.ham_callsign.get().strip(),
             'mission_eligible': self.vars.mission_eligible.get(),
+            'member_status': self.vars.member_status.get(),
             'certifications': self._get_certifications_from_tree(),
         }
         
@@ -2775,12 +2908,34 @@ class TrainingTrackerApp:
     def _ensure_member_attendance_records(self, member_id: int):
         """Ensure attendance records exist for a member in all sessions.
         
+        Only creates records for sessions that don't already have one.
+        Does NOT overwrite existing attendance data.
+        
         Args:
             member_id: ID of the member
         """
-        sessions = self.db.get_all_sessions()
-        for session in sessions:
-            self.db.update_attendance(session['id'], member_id, False)
+        if not self.db.database_exists():
+            return
+            
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            
+            # Get all session IDs
+            cursor.execute("SELECT id FROM training_sessions")
+            session_ids = [row[0] for row in cursor.fetchall()]
+            
+            # Insert attendance records only where they don't exist (INSERT OR IGNORE)
+            for session_id in session_ids:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO attendance (session_id, member_id, attended)
+                    VALUES (?, ?, 0)
+                ''', (session_id, member_id))
+                
+            conn.commit()
+            
+        except Exception as e:
+            print(f"Error ensuring attendance records: {e}")
         
     def _on_delete_member(self):
         """Handle Delete Member button click."""
@@ -2903,6 +3058,7 @@ class TrainingTrackerApp:
         self.vars.emergency_contact_phone.set(member.get("emergency_contact_phone", ""))
         self.vars.ham_callsign.set(member.get("ham_callsign", ""))
         self.vars.mission_eligible.set(member.get("mission_eligible", False))
+        self.vars.member_status.set(member.get("member_status", "Member"))
         self.vars.selected_member_id.set(member.get("id", -1))
         
         # Load certification dates
@@ -3008,13 +3164,13 @@ class TrainingTrackerApp:
         # Update attendance section state based on whether date is selected
         self._update_attendance_section_state()
         
-        # Only auto-set Qualifying Training/Optional Training if a date was actually selected (not empty)
+        # Only auto-set Weekend Training/Weeknight Training if a date was actually selected (not empty)
         if date_str and date_str.strip():
             suggested_type = ui_support.suggest_session_type(date_str)
             current_type = self.vars.session_type.get()
             
-            # Only auto-set if currently Qualifying Training or Optional Training (not Mission/Other)
-            if current_type in ("Qualifying Training", "Optional Training"):
+            # Only auto-set if currently Weekend Training or Weeknight Training (not Mission/Other)
+            if current_type in ("Weekend Training", "Weeknight Training"):
                 self.vars.session_type.set(suggested_type)
                 self._on_session_type_changed()
                 
@@ -3056,10 +3212,10 @@ class TrainingTrackerApp:
             is_valid, result = ui_support.validate_date(date_str)
             if is_valid:
                 self.vars.session_date.set(result)
-                # Auto-set Qualifying Training/Optional Training
+                # Auto-set Weekend Training/Weeknight Training
                 suggested_type = ui_support.suggest_session_type(result)
                 current_type = self.vars.session_type.get()
-                if current_type in ("Qualifying Training", "Optional Training"):
+                if current_type in ("Weekend Training", "Weeknight Training"):
                     self.vars.session_type.set(suggested_type)
                     self._on_session_type_changed()
                 # Check for existing session
@@ -3095,9 +3251,9 @@ class TrainingTrackerApp:
                 response = messagebox.askyesnocancel(
                     "Session Type Changed",
                     f"You changed the session type to '{session_type}'.\n\n"
-                    "• Yes - Update the existing session\n"
-                    "• No - Create a new session with this type\n"
-                    "• Cancel - Revert to previous type"
+                    "â€¢ Yes - Update the existing session\n"
+                    "â€¢ No - Create a new session with this type\n"
+                    "â€¢ Cancel - Revert to previous type"
                 )
                 
                 if response is True:  # Yes - Update existing
@@ -3134,7 +3290,7 @@ class TrainingTrackerApp:
                     # Get the original session type from database
                     original_session = self.db.get_session(session_id)
                     if original_session:
-                        original_type = original_session.get('type', 'Qualifying Training')
+                        original_type = original_session.get('type', 'Weekend Training')
                         self.vars.session_type.set(original_type)
                         # Update description field visibility for original type
                         if original_type in ("Mission", "Team Meeting", "Other"):
@@ -3270,7 +3426,7 @@ class TrainingTrackerApp:
         
         self.vars.session_location.set(session.get('location', ''))
         self.vars.session_date.set(session.get('date', ''))
-        self.vars.session_type.set(session.get('type', 'Qualifying Training'))
+        self.vars.session_type.set(session.get('type', 'Weekend Training'))
         self.vars.session_description.set(session.get('description', ''))
         self.vars.selected_session_id.set(session.get('id', -1))
         
@@ -3579,9 +3735,9 @@ class TrainingTrackerApp:
         # Confirm the modification
         changes = []
         if new_date != original_date:
-            changes.append(f"Date: {original_date} â†’ {new_date}")
+            changes.append(f"Date: {original_date} Ã¢â€ â€™ {new_date}")
         if new_location != original_location:
-            changes.append(f"Location: {original_location} â†’ {new_location}")
+            changes.append(f"Location: {original_location} Ã¢â€ â€™ {new_location}")
         
         change_text = "\n".join(changes)
         
@@ -3650,7 +3806,8 @@ class TrainingTrackerApp:
         column = self.attendance_tree.identify_column(event.x)
         item = self.attendance_tree.identify_row(event.y)
         
-        if not item or column != "#2":  # Only allow toggling the attended column
+        # Attended column is now #3 (after name and status)
+        if not item or column != "#3":  # Only allow toggling the attended column
             return
         
         if not self.db.database_exists():
@@ -3677,11 +3834,11 @@ class TrainingTrackerApp:
                 # Save failed
                 return
         
-        # Toggle the value
+        # Toggle the value (attended is now at index 2: name, status, attended)
         values = list(self.attendance_tree.item(item, "values"))
-        current_attendance = values[1]
+        current_attendance = values[2]
         new_attendance = "Yes" if current_attendance == "No" else "No"
-        values[1] = new_attendance
+        values[2] = new_attendance
         self.attendance_tree.item(item, values=values)
         
         # Update database
@@ -3699,10 +3856,10 @@ class TrainingTrackerApp:
                 except ValueError:
                     pass
             
-            # Update weekend count display
-            weekend_count = self.db.get_weekend_attendance_count(member_id)
-            values[2] = str(weekend_count)
-            self.attendance_tree.item(item, values=values)
+            # COMMENTED OUT: Update weekend count display
+            # weekend_count = self.db.get_weekend_attendance_count(member_id)
+            # values[3] = str(weekend_count)
+            # self.attendance_tree.item(item, values=values)
         except ValueError:
             pass
             
@@ -3777,7 +3934,11 @@ class TrainingTrackerApp:
             self.attendance_tree.item(item, values=values)
             
     def _refresh_attendance_tree(self):
-        """Refresh the attendance treeview with current members."""
+        """Refresh the attendance treeview with current members.
+        
+        Members are sorted by status (Member, Candidate, Guest) first,
+        then by name within each status group.
+        """
         # Clear current items
         for item in self.attendance_tree.get_children():
             self.attendance_tree.delete(item)
@@ -3794,11 +3955,8 @@ class TrainingTrackerApp:
             # Get attendance summary for this session
             attendance_data = self.db.get_member_attendance_summary(session_id)
             
-            # Sort based on preference
-            if sort_by_first:
-                attendance_data.sort(key=lambda x: (x['first_name'].lower(), x['last_name'].lower()))
-            else:
-                attendance_data.sort(key=lambda x: (x['last_name'].lower(), x['first_name'].lower()))
+            # Sort by status first, then by name using the helper function
+            attendance_data = ui_support.sort_members_by_status_then_name(attendance_data, sort_by_first)
             
             for i, data in enumerate(attendance_data):
                 # Format name based on sort preference
@@ -3806,24 +3964,23 @@ class TrainingTrackerApp:
                     name = f"{data['first_name']} {data['last_name']}"
                 else:
                     name = f"{data['last_name']}, {data['first_name']}"
-                    
+                
+                status = data.get('member_status', 'Member')
                 attended = "Yes" if data['attended'] else "No"
-                weekend_count = str(data['weekend_count'])
+                # COMMENTED OUT: weekend_count = str(data['weekend_count'])
                 
                 tag = 'oddrow' if i % 2 else 'evenrow'
                 self.attendance_tree.insert("", tk.END,
-                                           values=(name, attended, weekend_count),
+                                           values=(name, status, attended),
+                                           # COMMENTED OUT: values=(name, status, attended, weekend_count),
                                            iid=f"member_{data['id']}",
                                            tags=(tag,))
         else:
             # No session selected, show all members with default No
             members = self.db.get_all_members()
             
-            # Sort based on preference
-            if sort_by_first:
-                members.sort(key=lambda x: (x.get('first_name', '').lower(), x.get('last_name', '').lower()))
-            else:
-                members.sort(key=lambda x: (x.get('last_name', '').lower(), x.get('first_name', '').lower()))
+            # Sort by status first, then by name using the helper function
+            members = ui_support.sort_members_by_status_then_name(members, sort_by_first)
             
             for i, member in enumerate(members):
                 # Format name based on sort preference
@@ -3831,12 +3988,14 @@ class TrainingTrackerApp:
                     name = f"{member.get('first_name', '')} {member.get('last_name', '')}"
                 else:
                     name = f"{member.get('last_name', '')}, {member.get('first_name', '')}"
-                    
-                weekend_count = self.db.get_weekend_attendance_count(member['id'])
+                
+                status = member.get('member_status', 'Member')
+                # COMMENTED OUT: weekend_count = self.db.get_weekend_attendance_count(member['id'])
                 
                 tag = 'oddrow' if i % 2 else 'evenrow'
                 self.attendance_tree.insert("", tk.END,
-                                           values=(name, "No", str(weekend_count)),
+                                           values=(name, status, "No"),
+                                           # COMMENTED OUT: values=(name, status, "No", str(weekend_count)),
                                            iid=f"member_{member['id']}",
                                            tags=(tag,))
             

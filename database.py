@@ -144,6 +144,16 @@ class DatabaseManager:
             except sqlite3.Error:
                 pass  # Column might already exist or table doesn't exist yet
         
+        # Check if members table has member_status column, add if missing
+        cursor.execute("PRAGMA table_info(members)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'member_status' not in columns:
+            try:
+                cursor.execute("ALTER TABLE members ADD COLUMN member_status TEXT DEFAULT 'Member'")
+                self.connection.commit()
+            except sqlite3.Error:
+                pass  # Column might already exist or table doesn't exist yet
+        
     def close(self):
         """Close the database connection."""
         if self.connection:
@@ -208,6 +218,7 @@ class DatabaseManager:
                     emergency_contact_phone TEXT,
                     ham_callsign TEXT,
                     mission_eligible INTEGER DEFAULT 0,
+                    member_status TEXT DEFAULT 'Member',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(first_name, last_name)
@@ -411,6 +422,7 @@ class DatabaseManager:
                         emergency_contact_phone = ?,
                         ham_callsign = ?,
                         mission_eligible = ?,
+                        member_status = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 ''', (
@@ -425,6 +437,7 @@ class DatabaseManager:
                     member_data.get('emergency_contact_phone', ''),
                     member_data.get('ham_callsign', ''),
                     1 if member_data.get('mission_eligible', False) else 0,
+                    member_data.get('member_status', 'Member'),
                     member_id
                 ))
                 conn.commit()
@@ -451,6 +464,7 @@ class DatabaseManager:
                             emergency_contact_phone = ?,
                             ham_callsign = ?,
                             mission_eligible = ?,
+                            member_status = ?,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                     ''', (
@@ -463,6 +477,7 @@ class DatabaseManager:
                         member_data.get('emergency_contact_phone', ''),
                         member_data.get('ham_callsign', ''),
                         1 if member_data.get('mission_eligible', False) else 0,
+                        member_data.get('member_status', 'Member'),
                         member_id
                     ))
                     conn.commit()
@@ -473,8 +488,8 @@ class DatabaseManager:
                         INSERT INTO members (
                             first_name, last_name, address, cell_phone, home_phone,
                             email, alternate_email, emergency_contact_name,
-                            emergency_contact_phone, ham_callsign, mission_eligible
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            emergency_contact_phone, ham_callsign, mission_eligible, member_status
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         first_name,
                         last_name,
@@ -486,7 +501,8 @@ class DatabaseManager:
                         member_data.get('emergency_contact_name', ''),
                         member_data.get('emergency_contact_phone', ''),
                         member_data.get('ham_callsign', ''),
-                        1 if member_data.get('mission_eligible', False) else 0
+                        1 if member_data.get('mission_eligible', False) else 0,
+                        member_data.get('member_status', 'Member')
                     ))
                     member_id = cursor.lastrowid
                     conn.commit()
@@ -574,6 +590,9 @@ class DatabaseManager:
             if row:
                 member = dict(row)
                 member['mission_eligible'] = bool(member['mission_eligible'])
+                # Ensure member_status has a default value
+                if 'member_status' not in member or member['member_status'] is None:
+                    member['member_status'] = 'Member'
                 member['certifications'] = self._get_member_certifications(member_id)
                 return member
             return None
@@ -605,6 +624,9 @@ class DatabaseManager:
             if row:
                 member = dict(row)
                 member['mission_eligible'] = bool(member['mission_eligible'])
+                # Ensure member_status has a default value
+                if 'member_status' not in member or member['member_status'] is None:
+                    member['member_status'] = 'Member'
                 member['certifications'] = self._get_member_certifications(member['id'])
                 return member
             return None
@@ -652,6 +674,9 @@ class DatabaseManager:
             for row in cursor.fetchall():
                 member = dict(row)
                 member['mission_eligible'] = bool(member['mission_eligible'])
+                # Ensure member_status has a default value
+                if 'member_status' not in member or member['member_status'] is None:
+                    member['member_status'] = 'Member'
                 member['certifications'] = self._get_member_certifications(member['id'])
                 members.append(member)
                 
@@ -698,7 +723,7 @@ class DatabaseManager:
             session_id = session_data.get('id', -1)
             location = session_data.get('location', '').strip()
             session_date = session_data.get('date', '').strip()
-            session_type = session_data.get('type', 'Weekend')
+            session_type = session_data.get('type', 'Weekend Training')
             description = session_data.get('description', '')
             
             if not location or not session_date:
@@ -1021,14 +1046,14 @@ class DatabaseManager:
             return False
             
     def get_weekend_attendance_count(self, member_id: int, months: int = 6) -> int:
-        """Get count of qualifying training sessions attended by a member in the last N months.
+        """Get count of weekend training sessions attended by a member in the last N months.
         
         Args:
             member_id: ID of the member
             months: Number of months to look back (default 6)
             
         Returns:
-            Count of qualifying training sessions attended
+            Count of weekend training sessions attended
         """
         try:
             conn = self._get_connection()
@@ -1038,12 +1063,13 @@ class DatabaseManager:
             cutoff_date = datetime.now() - timedelta(days=months * 30)
             
             # We need to filter by date in Python since date format is MM/DD/YYYY
+            # Check for both old and new session type names
             cursor.execute('''
                 SELECT ts.session_date FROM attendance a
                 JOIN training_sessions ts ON a.session_id = ts.id
                 WHERE a.member_id = ?
                 AND a.attended = 1
-                AND ts.session_type = 'Qualifying Training'
+                AND (ts.session_type = 'Weekend Training' OR ts.session_type = 'Qualifying Training')
             ''', (member_id,))
             
             count = 0
@@ -1076,7 +1102,7 @@ class DatabaseManager:
             
             # Get all members with their attendance for this session
             cursor.execute('''
-                SELECT m.id, m.first_name, m.last_name, 
+                SELECT m.id, m.first_name, m.last_name, m.member_status,
                        COALESCE(a.attended, 0) as attended
                 FROM members m
                 LEFT JOIN attendance a ON m.id = a.member_id AND a.session_id = ?
@@ -1086,13 +1112,16 @@ class DatabaseManager:
             results = []
             for row in cursor.fetchall():
                 member_id = row[0]
-                weekend_count = self.get_weekend_attendance_count(member_id)
+                # Commented out weekend_count as per requirements
+                # weekend_count = self.get_weekend_attendance_count(member_id)
+                member_status = row[3] if row[3] else 'Member'
                 results.append({
                     'id': member_id,
                     'first_name': row[1],
                     'last_name': row[2],
-                    'attended': bool(row[3]),
-                    'weekend_count': weekend_count
+                    'member_status': member_status,
+                    'attended': bool(row[4]),
+                    # 'weekend_count': weekend_count  # Commented out
                 })
                 
             return results
@@ -1323,8 +1352,8 @@ class DatabaseManager:
                     INSERT INTO members (
                         first_name, last_name, address, cell_phone, home_phone,
                         email, alternate_email, emergency_contact_name,
-                        emergency_contact_phone, ham_callsign, mission_eligible
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        emergency_contact_phone, ham_callsign, mission_eligible, member_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     member.get("first_name", ""),
                     member.get("last_name", ""),
@@ -1336,7 +1365,8 @@ class DatabaseManager:
                     member.get("emergency_contact_name", ""),
                     member.get("emergency_contact_phone", ""),
                     member.get("ham_callsign", ""),
-                    member.get("mission_eligible", 0)
+                    member.get("mission_eligible", 0),
+                    member.get("member_status", "Member")
                 ))
                 new_id = cursor.lastrowid
                 member_id_map[old_id] = new_id
@@ -1358,7 +1388,7 @@ class DatabaseManager:
                 ''', (
                     session.get("location", ""),
                     session.get("session_date", ""),
-                    session.get("session_type", "Weekend"),
+                    session.get("session_type", "Weekend Training"),
                     session.get("description", "")
                 ))
                 session_id_map[old_id] = cursor.lastrowid

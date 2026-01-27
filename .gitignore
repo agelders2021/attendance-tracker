@@ -12,6 +12,7 @@ Secondary Backup/
 # Database files
 *.db
 Data/
+Data*/
 Backup/
 
 # Python cache

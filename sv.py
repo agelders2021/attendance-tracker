@@ -54,6 +54,9 @@ class AppVariables:
         self.email = tk.StringVar()
         self.alternate_email = tk.StringVar()
         
+        # Member Status (Member, Candidate, or Guest)
+        self.member_status = tk.StringVar(value="Member")
+        
         # Emergency Contact
         self.emergency_contact_name = tk.StringVar()
         self.emergency_contact_phone = tk.StringVar()
@@ -82,7 +85,7 @@ class AppVariables:
         # Session Details
         self.session_location = tk.StringVar()
         self.session_date = tk.StringVar()
-        self.session_type = tk.StringVar(value="Qualifying Training")  # Default to Qualifying Training
+        self.session_type = tk.StringVar(value="Weekend Training")  # Default to Weekend Training
         self.session_description = tk.StringVar()  # For Mission/Other description
         
         # Currently selected session ID
@@ -120,6 +123,7 @@ class AppVariables:
         self.home_phone.set("")
         self.email.set("")
         self.alternate_email.set("")
+        self.member_status.set("Member")
         self.emergency_contact_name.set("")
         self.emergency_contact_phone.set("")
         self.ham_callsign.set("")
@@ -138,7 +142,7 @@ class AppVariables:
         """Clear all training session fields."""
         self.session_location.set("")
         self.session_date.set("")
-        self.session_type.set("Qualifying Training")
+        self.session_type.set("Weekend Training")
         self.session_description.set("")
         self.selected_session_id.set(-1)
         
