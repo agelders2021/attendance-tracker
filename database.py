@@ -741,6 +741,11 @@ class DatabaseManager:
                     WHERE id = ?
                 ''', (location, session_date, session_type, description, session_id))
                 conn.commit()
+                
+                # Verify the update was successful
+                if cursor.rowcount == 0:
+                    return False, session_id, f"No session found with id {session_id}"
+                    
                 message = "Session updated successfully"
             else:
                 # Check if session already exists

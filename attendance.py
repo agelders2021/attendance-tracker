@@ -181,7 +181,8 @@ class TrainingTrackerApp:
         self.vars.sender_email.set(self.config.sender_email or "")
         self.vars.sender_password.set(self.config.sender_password or "")
         self.vars.smtp_encryption.set(self.config.smtp_encryption or "TLS")
-        self.vars.pdf_months_to_review.set(self.config.pdf_months_to_review)
+        # Always default to 1 month - don't remember from previous session
+        self.vars.pdf_months_to_review.set(1)
             
         # Restore window geometry if saved
         geometry = self.config.window_geometry
@@ -240,12 +241,15 @@ class TrainingTrackerApp:
             
             # Check if we should clean up old backups (once per month)
             self._cleanup_old_backups(backup_folder)
+        
+        # Save pdf_months_to_review BEFORE sending emails so it uses the current spinbox value
+        self.config.pdf_months_to_review = self.vars.pdf_months_to_review.get()
             
         # Send monthly emails if it's a new month
         if self.db.database_exists():
             self._send_monthly_emails_if_needed()
         
-        # Save current settings to config
+        # Save current settings to config (pdf_months_to_review already saved above)
         self.config.primary_storage_folder = self.vars.primary_storage_folder.get()
         self.config.secondary_backup_folder = self.vars.secondary_backup_folder.get()
         self.config.excel_participation_folder = self.vars.excel_participation_folder.get()
@@ -258,7 +262,6 @@ class TrainingTrackerApp:
         self.config.sender_email = self.vars.sender_email.get()
         self.config.sender_password = self.vars.sender_password.get()
         self.config.smtp_encryption = self.vars.smtp_encryption.get()
-        self.config.pdf_months_to_review = self.vars.pdf_months_to_review.get()
         self.config.window_geometry = self.root.geometry()
         self.config.save()
         
@@ -3782,6 +3785,19 @@ class TrainingTrackerApp:
             self.ui_state.sessions_list = self.db.get_all_sessions()
             self.refresh_location_combobox()
             
+            # Verify the update by re-reading from database
+            updated_session = self.db.get_session(session_id)
+            if updated_session:
+                actual_location = updated_session.get('location', '')
+                actual_date = updated_session.get('date', '')
+                if actual_location != new_location or actual_date != new_date:
+                    messagebox.showwarning("Verification Warning",
+                        f"Session may not have saved correctly.\n\n"
+                        f"Expected location: {new_location}\n"
+                        f"Actual location: {actual_location}\n\n"
+                        f"Expected date: {new_date}\n"
+                        f"Actual date: {actual_date}")
+            
             # Mark session as saved
             self.ui_state.mark_session_saved(self._get_current_session_data())
             
@@ -3930,7 +3946,8 @@ class TrainingTrackerApp:
         """Reset the attendance list to default (all No)."""
         for item in self.attendance_tree.get_children():
             values = list(self.attendance_tree.item(item, "values"))
-            values[1] = "No"
+            # Attended is now column index 2 (name=0, status=1, attended=2)
+            values[2] = "No"
             self.attendance_tree.item(item, values=values)
             
     def _refresh_attendance_tree(self):
