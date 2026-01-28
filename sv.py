@@ -54,8 +54,11 @@ class AppVariables:
         self.email = tk.StringVar()
         self.alternate_email = tk.StringVar()
         
-        # Member Status (Member, Candidate, or Pre-Candidate)
+        # Member Status (Member, Candidate, Affiliate, or Pre-Candidate)
         self.member_status = tk.StringVar(value="")  # Start empty, no default
+        
+        # Member Role (Canine Handler, Field Support, Base Support, Provisional Field Support, None)
+        self.member_role = tk.StringVar(value="None")  # Default to 'None'
         
         # Emergency Contact
         self.emergency_contact_name = tk.StringVar()
@@ -124,6 +127,7 @@ class AppVariables:
         self.email.set("")
         self.alternate_email.set("")
         self.member_status.set("")  # No default status when clearing
+        self.member_role.set("None")  # Reset to 'None' when clearing
         self.emergency_contact_name.set("")
         self.emergency_contact_phone.set("")
         self.ham_callsign.set("")

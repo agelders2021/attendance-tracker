@@ -154,6 +154,16 @@ class DatabaseManager:
             except sqlite3.Error:
                 pass  # Column might already exist or table doesn't exist yet
         
+        # Check if members table has member_role column, add if missing
+        cursor.execute("PRAGMA table_info(members)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'member_role' not in columns:
+            try:
+                cursor.execute("ALTER TABLE members ADD COLUMN member_role TEXT DEFAULT 'None'")
+                self.connection.commit()
+            except sqlite3.Error:
+                pass  # Column might already exist or table doesn't exist yet
+        
     def close(self):
         """Close the database connection."""
         if self.connection:
@@ -219,6 +229,7 @@ class DatabaseManager:
                     ham_callsign TEXT,
                     mission_eligible INTEGER DEFAULT 0,
                     member_status TEXT DEFAULT 'Member',
+                    member_role TEXT DEFAULT 'None',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(first_name, last_name)
@@ -423,6 +434,7 @@ class DatabaseManager:
                         ham_callsign = ?,
                         mission_eligible = ?,
                         member_status = ?,
+                        member_role = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 ''', (
@@ -438,6 +450,7 @@ class DatabaseManager:
                     member_data.get('ham_callsign', ''),
                     1 if member_data.get('mission_eligible', False) else 0,
                     member_data.get('member_status', 'Member'),
+                    member_data.get('member_role', 'None'),
                     member_id
                 ))
                 conn.commit()
@@ -465,6 +478,7 @@ class DatabaseManager:
                             ham_callsign = ?,
                             mission_eligible = ?,
                             member_status = ?,
+                            member_role = ?,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                     ''', (
@@ -478,6 +492,7 @@ class DatabaseManager:
                         member_data.get('ham_callsign', ''),
                         1 if member_data.get('mission_eligible', False) else 0,
                         member_data.get('member_status', 'Member'),
+                        member_data.get('member_role', 'None'),
                         member_id
                     ))
                     conn.commit()
@@ -488,8 +503,8 @@ class DatabaseManager:
                         INSERT INTO members (
                             first_name, last_name, address, cell_phone, home_phone,
                             email, alternate_email, emergency_contact_name,
-                            emergency_contact_phone, ham_callsign, mission_eligible, member_status
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            emergency_contact_phone, ham_callsign, mission_eligible, member_status, member_role
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         first_name,
                         last_name,
@@ -502,7 +517,8 @@ class DatabaseManager:
                         member_data.get('emergency_contact_phone', ''),
                         member_data.get('ham_callsign', ''),
                         1 if member_data.get('mission_eligible', False) else 0,
-                        member_data.get('member_status', 'Member')
+                        member_data.get('member_status', 'Member'),
+                        member_data.get('member_role', 'None')
                     ))
                     member_id = cursor.lastrowid
                     conn.commit()
@@ -593,6 +609,9 @@ class DatabaseManager:
                 # Ensure member_status has a default value
                 if 'member_status' not in member or member['member_status'] is None:
                     member['member_status'] = 'Member'
+                # Ensure member_role has a default value
+                if 'member_role' not in member or member['member_role'] is None:
+                    member['member_role'] = 'None'
                 member['certifications'] = self._get_member_certifications(member_id)
                 return member
             return None
@@ -627,6 +646,9 @@ class DatabaseManager:
                 # Ensure member_status has a default value
                 if 'member_status' not in member or member['member_status'] is None:
                     member['member_status'] = 'Member'
+                # Ensure member_role has a default value
+                if 'member_role' not in member or member['member_role'] is None:
+                    member['member_role'] = 'None'
                 member['certifications'] = self._get_member_certifications(member['id'])
                 return member
             return None
@@ -677,6 +699,9 @@ class DatabaseManager:
                 # Ensure member_status has a default value
                 if 'member_status' not in member or member['member_status'] is None:
                     member['member_status'] = 'Member'
+                # Ensure member_role has a default value
+                if 'member_role' not in member or member['member_role'] is None:
+                    member['member_role'] = 'None'
                 member['certifications'] = self._get_member_certifications(member['id'])
                 members.append(member)
                 

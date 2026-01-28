@@ -510,7 +510,7 @@ class TrainingTrackerApp:
         """
         dialog = tk.Toplevel(self.root)
         dialog.title("Review Attendance")
-        dialog.geometry("500x600")
+        dialog.geometry("610x600")
         dialog.transient(self.root)
         dialog.grab_set()
         
@@ -579,7 +579,7 @@ class TrainingTrackerApp:
         # Populate listbox with members, track indices by status
         member_map = {}
         member_indices = []  # List of (index, member) tuples
-        status_indices = {'Member': [], 'Candidate': [], 'Pre-Candidate': []}
+        status_indices = {'Member': [], 'Candidate': [], 'Affiliate': [], 'Pre-Candidate': []}
         
         for i, member in enumerate(sorted_members):
             status = member.get('member_status', 'Member')
@@ -595,6 +595,7 @@ class TrainingTrackerApp:
             'all': False,  # False = Select All, True = Deselect All
             'Member': False,
             'Candidate': False,
+            'Affiliate': False,
             'Pre-Candidate': False
         }
         
@@ -612,10 +613,11 @@ class TrainingTrackerApp:
                 select_all_btn.config(text="Select All")
                 button_states['all'] = False
                 # Reset all status buttons
-                for status in ['Member', 'Candidate', 'Pre-Candidate']:
+                for status in ['Member', 'Candidate', 'Affiliate', 'Pre-Candidate']:
                     button_states[status] = False
                 select_members_btn.config(text="Select Members")
                 select_candidates_btn.config(text="Select Candidates")
+                select_affiliates_btn.config(text="Select Affiliates")
                 select_precandidates_btn.config(text="Select Pre-Candidates")
         
         def toggle_status(status, button):
@@ -641,6 +643,10 @@ class TrainingTrackerApp:
         select_candidates_btn = ttk.Button(select_frame, text="Select Candidates", 
                                             command=lambda: toggle_status('Candidate', select_candidates_btn))
         select_candidates_btn.pack(side=tk.LEFT, padx=5)
+        
+        select_affiliates_btn = ttk.Button(select_frame, text="Select Affiliates", 
+                                            command=lambda: toggle_status('Affiliate', select_affiliates_btn))
+        select_affiliates_btn.pack(side=tk.LEFT, padx=5)
         
         select_precandidates_btn = ttk.Button(select_frame, text="Select Pre-Candidates", 
                                         command=lambda: toggle_status('Pre-Candidate', select_precandidates_btn))
@@ -794,48 +800,83 @@ class TrainingTrackerApp:
                 percent = int(round(attended / total * 100))
                 return f"{attended} ({percent}%)"
             
-            # Build summary table data - calculate attendance for each member
+            # Build summary table data - calculate attendance for each member, grouped by status
             summary_table_data = [['Member', 'Weekend\nSessions', 'Weeknight\nSessions', 'Missions', 'Meetings', 'Other']]
             
+            # Group members by status
+            members_by_status = {}
             for member in sorted_members:
-                member_id = member.get('id')
-                member_name = f"{member.get('last_name', '')}, {member.get('first_name', '')}"
-                
-                # Calculate attendance for each session type
-                qualifying_attended = 0
-                optional_attended = 0
-                mission_attended = 0
-                team_meeting_attended = 0
-                other_attended = 0
-                
-                for session in sessions_in_range:
-                    session_id = session.get('id')
-                    attended = self.db.get_attendance_status(session_id, member_id)
-                    session_type = session.get('type', '')
-                    if attended:
-                        if session_type == 'Weekend Training':
-                            qualifying_attended += 1
-                        elif session_type == 'Weeknight Training':
-                            optional_attended += 1
-                        elif session_type == 'Mission':
-                            mission_attended += 1
-                        elif session_type == 'Team Meeting':
-                            team_meeting_attended += 1
-                        elif session_type == 'Other':
-                            other_attended += 1
-                
-                summary_table_data.append([
-                    member_name,
-                    format_with_percent(qualifying_attended, total_qualifying),
-                    format_with_percent(optional_attended, total_optional),
-                    format_with_percent(mission_attended, total_mission),
-                    format_with_percent(team_meeting_attended, total_team_meeting),
-                    format_with_percent(other_attended, total_other)
-                ])
+                status = member.get('member_status', 'Member')
+                if status not in members_by_status:
+                    members_by_status[status] = []
+                members_by_status[status].append(member)
             
-            # Create summary table with repeatRows=1 to repeat header on page breaks
+            # Track rows for styling (need to know which rows are status headers)
+            status_header_rows = []
+            current_row = 1  # Start after the column header row
+            
+            # Map status values to plural display labels
+            status_labels = {
+                'Member': 'Members',
+                'Candidate': 'Candidates',
+                'Affiliate': 'Affiliates',
+                'Pre-Candidate': 'Pre-Candidates'
+            }
+            
+            # Process each status in order: Member, Candidate, Affiliate, Pre-Candidate
+            for status in ['Member', 'Candidate', 'Affiliate', 'Pre-Candidate']:
+                if status not in members_by_status or not members_by_status[status]:
+                    continue  # Skip if no members with this status
+                
+                # Add status header row (spanning all columns) - use plural label
+                summary_table_data.append([status_labels[status], '', '', '', '', ''])
+                status_header_rows.append(current_row)
+                current_row += 1
+                
+                # Add members for this status
+                for member in members_by_status[status]:
+                    member_id = member.get('id')
+                    member_name = f"{member.get('last_name', '')}, {member.get('first_name', '')}"
+                    
+                    # Calculate attendance for each session type
+                    qualifying_attended = 0
+                    optional_attended = 0
+                    mission_attended = 0
+                    team_meeting_attended = 0
+                    other_attended = 0
+                    
+                    for session in sessions_in_range:
+                        session_id = session.get('id')
+                        attended = self.db.get_attendance_status(session_id, member_id)
+                        session_type = session.get('type', '')
+                        if attended:
+                            if session_type == 'Weekend Training':
+                                qualifying_attended += 1
+                            elif session_type == 'Weeknight Training':
+                                optional_attended += 1
+                            elif session_type == 'Mission':
+                                mission_attended += 1
+                            elif session_type == 'Team Meeting':
+                                team_meeting_attended += 1
+                            elif session_type == 'Other':
+                                other_attended += 1
+                    
+                    summary_table_data.append([
+                        member_name,
+                        format_with_percent(qualifying_attended, total_qualifying),
+                        format_with_percent(optional_attended, total_optional),
+                        format_with_percent(mission_attended, total_mission),
+                        format_with_percent(team_meeting_attended, total_team_meeting),
+                        format_with_percent(other_attended, total_other)
+                    ])
+                    current_row += 1
+            
+            # Create summary table with repeatRows=1 to repeat column header on page breaks
             summary_table = Table(summary_table_data, colWidths=[150, 70, 70, 60, 60, 60], repeatRows=1)
-            summary_table.setStyle(TableStyle([
+            
+            # Build style list dynamically based on which rows are status headers
+            table_style = [
+                # Column header row (row 0)
                 ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
@@ -844,12 +885,38 @@ class TrainingTrackerApp:
                 ('FONTSIZE', (0, 0), (-1, 0), 10),
                 ('TOPPADDING', (0, 0), (-1, 0), 8),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                ('ALIGN', (0, 1), (0, -1), 'LEFT'),  # Member names left-aligned
-                ('ALIGN', (1, 1), (-1, -1), 'CENTER'),  # Numbers centered
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                # Grid for entire table
                 ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                ('FONTSIZE', (0, 1), (-1, -1), 9),
-            ]))
+            ]
+            
+            # Style for all data rows (everything except row 0 and status headers)
+            data_rows_start = 1
+            data_rows_end = len(summary_table_data) - 1
+            if data_rows_end >= data_rows_start:
+                table_style.extend([
+                    ('ALIGN', (0, data_rows_start), (0, data_rows_end), 'LEFT'),  # Member names left-aligned
+                    ('ALIGN', (1, data_rows_start), (-1, data_rows_end), 'CENTER'),  # Numbers centered
+                    ('FONTSIZE', (0, data_rows_start), (-1, data_rows_end), 9),
+                ])
+                # Background for data rows (not status headers)
+                for row_num in range(data_rows_start, data_rows_end + 1):
+                    if row_num not in status_header_rows:
+                        table_style.append(('BACKGROUND', (0, row_num), (-1, row_num), colors.beige))
+            
+            # Add styling for status header rows AFTER data row styles so CENTER alignment takes precedence
+            for row in status_header_rows:
+                table_style.extend([
+                    ('SPAN', (0, row), (-1, row)),  # Span across all columns
+                    ('BACKGROUND', (0, row), (-1, row), colors.lightgrey),
+                    ('FONTNAME', (0, row), (-1, row), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, row), (-1, row), 11),
+                    ('ALIGN', (0, row), (-1, row), 'CENTER'),  # CENTER - applied after data row LEFT alignment
+                    ('VALIGN', (0, row), (-1, row), 'MIDDLE'),
+                    ('TOPPADDING', (0, row), (-1, row), 6),
+                    ('BOTTOMPADDING', (0, row), (-1, row), 6),
+                ])
+            
+            summary_table.setStyle(TableStyle(table_style))
             
             story.append(summary_table)
             
@@ -2131,7 +2198,7 @@ class TrainingTrackerApp:
         self.address_entry.pack(side=tk.LEFT)
         self.demographics_entry_widgets.append(self.address_entry)
         
-        # Row 3: Status radiobuttons (Member/Candidate/Pre-Candidate) and Mission Eligible checkbox
+        # Row 3: Status radiobuttons (Member/Candidate/Affiliate/Pre-Candidate) and Mission Eligible checkbox
         row3 = ttk.Frame(frame)
         row3.pack(fill=tk.X, pady=2)
         
@@ -2159,6 +2226,26 @@ class TrainingTrackerApp:
         )
         self.mission_check.pack(side=tk.LEFT, padx=20)
         self.demographics_entry_widgets.append(self.mission_check)
+        
+        # Row 4: Role radiobuttons (Canine Handler, Field Support, Base Support, Provisional Field Support)
+        row4 = ttk.Frame(frame)
+        row4.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(row4, text="Role:", width=15).pack(side=tk.LEFT)
+        
+        # Role radiobuttons
+        self.role_radios = []
+        for role in ui_support.get_member_roles():
+            rb = ttk.Radiobutton(
+                row4,
+                text=role,
+                variable=self.vars.member_role,
+                value=role,
+                command=self._on_member_role_changed
+            )
+            rb.pack(side=tk.LEFT, padx=5)
+            self.role_radios.append(rb)
+            self.demographics_entry_widgets.append(rb)
         
     def _build_contact_info_section(self, parent):
         """Build the contact information section.
@@ -2743,6 +2830,7 @@ class TrainingTrackerApp:
         
         All fields except name fields and members list are disabled when
         either first or last name is blank.
+        Role radiobuttons are additionally disabled for Affiliate and Pre-Candidate status.
         """
         first_name = self.vars.first_name.get().strip()
         last_name = self.vars.last_name.get().strip()
@@ -2754,13 +2842,45 @@ class TrainingTrackerApp:
         # Clear member_status when disabling so no radiobutton is selected
         if not enable:
             self.vars.member_status.set("")
+            self.vars.member_role.set("None")
         
-        # Update all entry widgets in demographics (except name fields)
+        # Update all entry widgets in demographics (except name fields and role radiobuttons)
+        # Role radiobuttons need special handling based on status
         for widget in self.demographics_entry_widgets:
+            # Skip role radiobuttons - they'll be handled separately
+            if widget in self.role_radios:
+                continue
             try:
                 widget.configure(state=state)
             except tk.TclError:
                 pass
+        
+        # Handle role radiobuttons based on status
+        status = self.vars.member_status.get()
+        if enable:
+            # Names are filled, check status
+            if status in ("Affiliate", "Pre-Candidate"):
+                # Disable role radiobuttons for Affiliate and Pre-Candidate
+                self.vars.member_role.set("None")
+                for rb in self.role_radios:
+                    try:
+                        rb.configure(state=tk.DISABLED)
+                    except tk.TclError:
+                        pass
+            else:
+                # Enable role radiobuttons for Member and Candidate (or empty status)
+                for rb in self.role_radios:
+                    try:
+                        rb.configure(state=tk.NORMAL)
+                    except tk.TclError:
+                        pass
+        else:
+            # Names are empty, disable all role radiobuttons
+            for rb in self.role_radios:
+                try:
+                    rb.configure(state=tk.DISABLED)
+                except tk.TclError:
+                    pass
                 
         # Also disable/enable the certifications treeview
         if self.cert_tree:
@@ -2812,20 +2932,54 @@ class TrainingTrackerApp:
         """Handle member status radiobutton change.
         
         Auto-saves the status if a member is currently being edited.
+        Disables role radiobuttons and sets to 'None' for Affiliate and Pre-Candidate.
         """
         member_id = self.vars.selected_member_id.get()
+        status = self.vars.member_status.get()
+        
+        # Disable role radiobuttons and set to 'None' for Affiliate and Pre-Candidate
+        if status in ("Affiliate", "Pre-Candidate"):
+            self.vars.member_role.set("None")
+            for rb in self.role_radios:
+                try:
+                    rb.configure(state=tk.DISABLED)
+                except tk.TclError:
+                    pass
+        else:
+            # Enable role radiobuttons for Member and Candidate
+            for rb in self.role_radios:
+                try:
+                    rb.configure(state=tk.NORMAL)
+                except tk.TclError:
+                    pass
         
         if member_id > 0 and self.db.database_exists():
             # Auto-save the status change
             member = self.db.get_member(member_id)
             if member:
-                member['member_status'] = self.vars.member_status.get()
+                member['member_status'] = status
+                # Also save the role (which will be 'None' for Affiliate/Pre-Candidate)
+                member['member_role'] = self.vars.member_role.get()
                 self.db.save_member(member)
                 
                 # Refresh the members list and attendance tree to show updated status
                 self.ui_state.members_list = self.db.get_all_members()
                 self._refresh_members_tree()
                 self._refresh_attendance_tree()
+                
+    def _on_member_role_changed(self):
+        """Handle member role radiobutton change.
+        
+        Auto-saves the role if a member is currently being edited.
+        """
+        member_id = self.vars.selected_member_id.get()
+        
+        if member_id > 0 and self.db.database_exists():
+            # Auto-save the role change
+            member = self.db.get_member(member_id)
+            if member:
+                member['member_role'] = self.vars.member_role.get()
+                self.db.save_member(member)
                 
     def _on_new_member(self):
         """Handle New Member button click."""
@@ -2880,6 +3034,7 @@ class TrainingTrackerApp:
             'ham_callsign': self.vars.ham_callsign.get().strip(),
             'mission_eligible': self.vars.mission_eligible.get(),
             'member_status': self.vars.member_status.get(),
+            'member_role': self.vars.member_role.get(),
             'certifications': self._get_certifications_from_tree(),
         }
         
@@ -3067,6 +3222,7 @@ class TrainingTrackerApp:
         self.vars.ham_callsign.set(member.get("ham_callsign", ""))
         self.vars.mission_eligible.set(member.get("mission_eligible", False))
         self.vars.member_status.set(member.get("member_status", "Member"))
+        self.vars.member_role.set(member.get("member_role", "None"))
         self.vars.selected_member_id.set(member.get("id", -1))
         
         # Load certification dates
@@ -3259,9 +3415,9 @@ class TrainingTrackerApp:
                 response = messagebox.askyesnocancel(
                     "Session Type Changed",
                     f"You changed the session type to '{session_type}'.\n\n"
-                    "Ã¢â‚¬Â¢ Yes - Update the existing session\n"
-                    "Ã¢â‚¬Â¢ No - Create a new session with this type\n"
-                    "Ã¢â‚¬Â¢ Cancel - Revert to previous type"
+                    "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Yes - Update the existing session\n"
+                    "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ No - Create a new session with this type\n"
+                    "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Cancel - Revert to previous type"
                 )
                 
                 if response is True:  # Yes - Update existing
@@ -3743,9 +3899,9 @@ class TrainingTrackerApp:
         # Confirm the modification
         changes = []
         if new_date != original_date:
-            changes.append(f"Date: {original_date} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {new_date}")
+            changes.append(f"Date: {original_date} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ {new_date}")
         if new_location != original_location:
-            changes.append(f"Location: {original_location} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {new_location}")
+            changes.append(f"Location: {original_location} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ {new_location}")
         
         change_text = "\n".join(changes)
         
