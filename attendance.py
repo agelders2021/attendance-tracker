@@ -579,7 +579,7 @@ class TrainingTrackerApp:
         # Populate listbox with members, track indices by status
         member_map = {}
         member_indices = []  # List of (index, member) tuples
-        status_indices = {'Member': [], 'Candidate': [], 'Guest': []}
+        status_indices = {'Member': [], 'Candidate': [], 'Pre-Candidate': []}
         
         for i, member in enumerate(sorted_members):
             status = member.get('member_status', 'Member')
@@ -595,7 +595,7 @@ class TrainingTrackerApp:
             'all': False,  # False = Select All, True = Deselect All
             'Member': False,
             'Candidate': False,
-            'Guest': False
+            'Pre-Candidate': False
         }
         
         # Selection buttons frame
@@ -612,11 +612,11 @@ class TrainingTrackerApp:
                 select_all_btn.config(text="Select All")
                 button_states['all'] = False
                 # Reset all status buttons
-                for status in ['Member', 'Candidate', 'Guest']:
+                for status in ['Member', 'Candidate', 'Pre-Candidate']:
                     button_states[status] = False
                 select_members_btn.config(text="Select Members")
                 select_candidates_btn.config(text="Select Candidates")
-                select_guests_btn.config(text="Select Guests")
+                select_precandidates_btn.config(text="Select Pre-Candidates")
         
         def toggle_status(status, button):
             indices = status_indices.get(status, [])
@@ -642,9 +642,9 @@ class TrainingTrackerApp:
                                             command=lambda: toggle_status('Candidate', select_candidates_btn))
         select_candidates_btn.pack(side=tk.LEFT, padx=5)
         
-        select_guests_btn = ttk.Button(select_frame, text="Select Guests", 
-                                        command=lambda: toggle_status('Guest', select_guests_btn))
-        select_guests_btn.pack(side=tk.LEFT, padx=5)
+        select_precandidates_btn = ttk.Button(select_frame, text="Select Pre-Candidates", 
+                                        command=lambda: toggle_status('Pre-Candidate', select_precandidates_btn))
+        select_precandidates_btn.pack(side=tk.LEFT, padx=5)
         
         # Button frame
         btn_frame = ttk.Frame(dialog)
@@ -1388,7 +1388,8 @@ class TrainingTrackerApp:
     def _build_setup_tab(self):
         """Build the Setup tab content."""
         # Main container
-        main_frame = ttk.Frame(self.setup_tab, padding=10)
+        # main_frame = tk.Frame(self.setup_tab, padding=10, bg='light green')
+        main_frame = tk.Frame(self.setup_tab,  bg='light green')
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         # Primary Storage Folder section
@@ -2058,7 +2059,7 @@ class TrainingTrackerApp:
     def _build_demographics_tab(self):
         """Build the Demographics tab content."""
         # Main container with scrollable frame
-        main_container = ttk.Frame(self.demographics_tab)
+        main_container = tk.Frame(self.demographics_tab, bg='light green')
         main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Top frame for form fields
@@ -2130,7 +2131,7 @@ class TrainingTrackerApp:
         self.address_entry.pack(side=tk.LEFT)
         self.demographics_entry_widgets.append(self.address_entry)
         
-        # Row 3: Status radiobuttons (Member/Candidate/Guest) and Mission Eligible checkbox
+        # Row 3: Status radiobuttons (Member/Candidate/Pre-Candidate) and Mission Eligible checkbox
         row3 = ttk.Frame(frame)
         row3.pack(fill=tk.X, pady=2)
         
@@ -2179,7 +2180,7 @@ class TrainingTrackerApp:
         self.demographics_entry_widgets.append(self.cell_entry)
         
         ttk.Label(row1, text="Email:", width=15).pack(side=tk.LEFT)
-        self.email_entry = tk.Entry(row1, textvariable=self.vars.email, width=30)
+        self.email_entry = tk.Entry(row1, textvariable=self.vars.email, width=50)
         self.email_entry.pack(side=tk.LEFT)
         self.demographics_entry_widgets.append(self.email_entry)
         
@@ -2194,7 +2195,7 @@ class TrainingTrackerApp:
         self.demographics_entry_widgets.append(self.home_entry)
         
         ttk.Label(row2, text="Alternate Email:", width=15).pack(side=tk.LEFT)
-        self.alt_email_entry = tk.Entry(row2, textvariable=self.vars.alternate_email, width=30)
+        self.alt_email_entry = tk.Entry(row2, textvariable=self.vars.alternate_email, width=50)
         self.alt_email_entry.pack(side=tk.LEFT)
         self.demographics_entry_widgets.append(self.alt_email_entry)
         
@@ -2497,7 +2498,7 @@ class TrainingTrackerApp:
     
     def _build_training_sessions_tab(self):
         """Build the Training Sessions tab content."""
-        main_container = ttk.Frame(self.training_sessions_tab)
+        main_container = tk.Frame(self.training_sessions_tab, bg='light green')
         main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Session details frame
@@ -2749,6 +2750,10 @@ class TrainingTrackerApp:
         # Determine if fields should be enabled - BOTH names must have values
         enable = bool(first_name and last_name)
         state = tk.NORMAL if enable else tk.DISABLED
+        
+        # Clear member_status when disabling so no radiobutton is selected
+        if not enable:
+            self.vars.member_status.set("")
         
         # Update all entry widgets in demographics (except name fields)
         for widget in self.demographics_entry_widgets:
@@ -3254,9 +3259,9 @@ class TrainingTrackerApp:
                 response = messagebox.askyesnocancel(
                     "Session Type Changed",
                     f"You changed the session type to '{session_type}'.\n\n"
-                    "â€¢ Yes - Update the existing session\n"
-                    "â€¢ No - Create a new session with this type\n"
-                    "â€¢ Cancel - Revert to previous type"
+                    "Ã¢â‚¬Â¢ Yes - Update the existing session\n"
+                    "Ã¢â‚¬Â¢ No - Create a new session with this type\n"
+                    "Ã¢â‚¬Â¢ Cancel - Revert to previous type"
                 )
                 
                 if response is True:  # Yes - Update existing
@@ -3738,9 +3743,9 @@ class TrainingTrackerApp:
         # Confirm the modification
         changes = []
         if new_date != original_date:
-            changes.append(f"Date: {original_date} Ã¢â€ â€™ {new_date}")
+            changes.append(f"Date: {original_date} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {new_date}")
         if new_location != original_location:
-            changes.append(f"Location: {original_location} Ã¢â€ â€™ {new_location}")
+            changes.append(f"Location: {original_location} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {new_location}")
         
         change_text = "\n".join(changes)
         

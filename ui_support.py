@@ -268,24 +268,24 @@ def get_member_statuses() -> List[str]:
     Returns:
         List of member status names
     """
-    return ["Member", "Candidate", "Guest"]
+    return ["Member", "Candidate", "Pre-Candidate"]
 
 
 def get_status_sort_order(status: str) -> int:
     """Get the sort order for a member status.
     
-    Members sort first, then Candidates, then Guests.
+    Members sort first, then Candidates, then Pre-Candidates.
     
     Args:
         status: Member status string
         
     Returns:
-        Sort order integer (0=Member, 1=Candidate, 2=Guest, 3=unknown)
+        Sort order integer (0=Member, 1=Candidate, 2=Pre-Candidate, 3=unknown)
     """
     status_order = {
         "Member": 0,
         "Candidate": 1,
-        "Guest": 2
+        "Pre-Candidate": 2
     }
     return status_order.get(status, 3)
 
@@ -309,7 +309,7 @@ def sort_members_by_last_name(members: List[Dict]) -> List[Dict]:
 def sort_members_by_status_then_name(members: List[Dict], sort_by_first: bool = False) -> List[Dict]:
     """Sort a list of members by status first, then by name.
     
-    Members sort first, then Candidates, then Guests.
+    Members sort first, then Candidates, then Pre-Candidates.
     Within each status group, sort alphabetically by name.
     
     Args:

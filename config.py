@@ -99,14 +99,14 @@ def get_config_path() -> str:
     """Get the path to the configuration file.
     
     Returns:
-        Full path to attendance.json in user's home folder
+        Full path to .attendance.json in user's home folder
     """
     home_folder = Path.home()
-    return str(home_folder / "attendance.json")
+    return str(home_folder / ".attendance.json")
 
 
 def load_config() -> Dict[str, Any]:
-    """Load configuration from attendance.json.
+    """Load configuration from .attendance.json.
     
     Returns:
         Dictionary containing configuration values
@@ -131,7 +131,7 @@ def load_config() -> Dict[str, Any]:
 
 
 def save_config(config: Dict[str, Any]) -> bool:
-    """Save configuration to attendance.json.
+    """Save configuration to .attendance.json.
     
     Args:
         config: Dictionary containing configuration values

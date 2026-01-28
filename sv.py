@@ -54,8 +54,8 @@ class AppVariables:
         self.email = tk.StringVar()
         self.alternate_email = tk.StringVar()
         
-        # Member Status (Member, Candidate, or Guest)
-        self.member_status = tk.StringVar(value="Member")
+        # Member Status (Member, Candidate, or Pre-Candidate)
+        self.member_status = tk.StringVar(value="")  # Start empty, no default
         
         # Emergency Contact
         self.emergency_contact_name = tk.StringVar()
@@ -123,7 +123,7 @@ class AppVariables:
         self.home_phone.set("")
         self.email.set("")
         self.alternate_email.set("")
-        self.member_status.set("Member")
+        self.member_status.set("")  # No default status when clearing
         self.emergency_contact_name.set("")
         self.emergency_contact_phone.set("")
         self.ham_callsign.set("")
