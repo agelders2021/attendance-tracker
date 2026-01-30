@@ -122,7 +122,7 @@ class SplashScreen:
         # Copyright
         copyright_label = tk.Label(
             frame,
-            text="Â© 2026 Al Gelders",
+            text="© 2026 Al Gelders",
             font=('Arial', 11),
             bg='white',
             fg='#34495e'

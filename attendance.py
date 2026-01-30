@@ -1586,7 +1586,7 @@ class TrainingTrackerApp:
         self.password_entry = ttk.Entry(row3, textvariable=self.vars.sender_password, width=25, show="*")
         self.password_entry.pack(side=tk.LEFT)
         
-        ttk.Label(row3, text="(App Password for Gmail)", font=('TkDefaultFont', 8)).pack(side=tk.LEFT, padx=(10, 20))
+        # ttk.Label(row3, text="(App Password for Gmail)", font=('TkDefaultFont', 8)).pack(side=tk.LEFT, padx=(10, 20))
         
         # ttk.Label(row3, text="Months in PDF:").pack(side=tk.LEFT)
         # self.pdf_months_spinbox = ttk.Spinbox(
@@ -4203,7 +4203,7 @@ def main():
         pass  # If config can't be loaded, splash will center on screen
     
     # Show splash screen centered over saved main window position
-    splash = SplashScreen(root, version="1.0.4-alpha",
+    splash = SplashScreen(root, version="1.0.5-alpha",
                           app_title="Attendance Tracker", 
                           github_url="github.com/agelders2021/attendance-tracker",
                           main_window_geometry=saved_geometry)
