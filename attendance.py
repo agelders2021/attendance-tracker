@@ -2538,6 +2538,7 @@ class TrainingTrackerApp:
         ttk.Button(frame, text="Save Member", command=self._on_save_member, width=15).pack(pady=2)
         ttk.Button(frame, text="Delete Member", command=self._on_delete_member, width=15).pack(pady=2)
         ttk.Button(frame, text="Clear Form", command=self._on_clear_demographics, width=15).pack(pady=2)
+        ttk.Button(frame, text="Cert Matrix PDF", command=self._on_generate_cert_matrix_pdf, width=15).pack(pady=2)
         
         
     def _build_members_list_section(self, parent):
@@ -3166,6 +3167,293 @@ class TrainingTrackerApp:
         self.ui_state.is_editing_member = False
         self._update_demographics_entry_states()
         
+    def _on_generate_cert_matrix_pdf(self):
+        """Generate a certification matrix PDF with vertical column headers."""
+        if not self.db.database_exists():
+            messagebox.showwarning("Database Required", 
+                                   "Please initialize the database first (Setup tab).")
+            return
+        
+        try:
+            from reportlab.lib.pagesizes import letter, landscape
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib import colors
+            from reportlab.lib.units import inch
+            from reportlab.pdfgen import canvas
+            from reportlab.graphics import renderPDF
+            from reportlab.graphics.shapes import Drawing, String
+            import tempfile
+            import subprocess
+            import sys
+            
+            # Get all members and certification types
+            members = self.db.get_all_members()
+            cert_types = self.db.get_certification_types()
+            
+            if not members:
+                messagebox.showinfo("No Members", "No members found in the database.")
+                return
+            
+            if not cert_types:
+                messagebox.showinfo("No Certifications", "No certification types found.")
+                return
+            
+            # Sort members by status then name
+            members = ui_support.sort_members_by_status_then_name(members, sort_by_first=False)
+            
+            # Helper function to format certification names for vertical display
+            def format_cert_name(text):
+                """Format certification name - split into 2 lines if 3+ words.
+                
+                Special handling:
+                - Hyphenated words (e.g., 'Blood-borne') count as 2 words
+                - Split to keep logical groupings (e.g., 'Crime Scene' together)
+                
+                Lines are returned in reading order (top line first when rotated).
+                With 90° counterclockwise rotation, text reads bottom-to-top.
+                """
+                # Replace hyphens with spaces to count them as separate words
+                words_for_counting = text.replace('-', ' ').split()
+                
+                if len(words_for_counting) >= 3:
+                    # Use original text for display, but smart splitting
+                    original_words = text.split()
+                    
+                    # Special cases for better readability
+                    # Return lines in the order they should appear (first line at bottom after rotation)
+                    if text == "Crime Scene Preservation":
+                        # Keep "Crime Scene" together - reads as "Crime Scene / Preservation"
+                        return ["Crime Scene", "Preservation"]
+                    elif text == "Blood-borne Pathogens":
+                        # Split at the hyphen - reads as "Blood-borne / Pathogens"
+                        return ["Blood-borne", "Pathogens"]
+                    elif text == "NM SAR Field Certification":
+                        # Split as "NM SAR" / "Field Certification"
+                        return ["NM SAR", "Field Certification"]
+                    elif "On-line Base Medical" in text or text == "On-line Base Medical":
+                        return ["On-line", "Base Medical"]
+                    else:
+                        # Default: split at midpoint
+                        mid = len(original_words) // 2
+                        line1 = ' '.join(original_words[:mid])
+                        line2 = ' '.join(original_words[mid:])
+                        return [line1, line2]
+                
+                return [text]
+            
+            # Helper function to create vertical text
+            def create_vertical_text(text_lines, width, height):
+                """Create a Drawing with vertically oriented text.
+                
+                Args:
+                    text_lines: List of text lines (can be single item or multiple)
+                    width: Width of the drawing (final width in table cell)
+                    height: Height of the drawing (final height in table cell)
+                    
+                Note: In ReportLab, transformations on Groups are applied in the order
+                they are called, but affect coordinates in reverse. We use transform
+                to apply rotation and translation together for proper positioning.
+                """
+                from reportlab.graphics.shapes import Group
+                
+                # Create drawing with actual cell dimensions
+                d = Drawing(width, height)
+                
+                # Calculate spacing for multi-line text
+                line_height = 10  # Space between lines
+                font_size = 8
+                
+                # For rotated text (reading bottom-to-top), we need to:
+                # 1. Create text strings at origin
+                # 2. Apply rotation transform
+                # 3. Position in center of cell
+                
+                # Create a group for all the text
+                g = Group()
+                
+                if len(text_lines) == 1:
+                    # Single line centered
+                    s = String(0, 0, text_lines[0], textAnchor='middle')
+                    s.fontName = 'Helvetica-Bold'
+                    s.fontSize = font_size
+                    s.fillColor = colors.white
+                    g.add(s)
+                else:
+                    # Multi-line - stack vertically after rotation
+                    # Lines are stacked along the x-axis, which becomes vertical after rotation
+                    total_height = (len(text_lines) - 1) * line_height
+                    
+                    for i, line in enumerate(text_lines):
+                        # Position each line - after rotation, x becomes y
+                        y_offset = (total_height / 2) - (i * line_height)
+                        s = String(0, y_offset, line, textAnchor='middle')
+                        s.fontName = 'Helvetica-Bold'
+                        s.fontSize = font_size
+                        s.fillColor = colors.white
+                        g.add(s)
+                
+                # Apply transformation: rotate 90° and position in center of cell
+                # The transform method applies a transformation matrix
+                # For 90° counterclockwise rotation: [cos(90), sin(90), -sin(90), cos(90), tx, ty]
+                # = [0, 1, -1, 0, tx, ty]
+                import math
+                # Position at center of cell
+                tx = width / 2
+                ty = height / 2
+                # Apply rotation (90° counterclockwise) and translation
+                g.transform = (0, 1, -1, 0, tx, ty)
+                
+                d.add(g)
+                return d
+            
+            # Create temp file
+            fd, pdf_path = tempfile.mkstemp(suffix='.pdf')
+            os.close(fd)
+            
+            # Use landscape orientation for wider table
+            doc = SimpleDocTemplate(pdf_path, pagesize=landscape(letter),
+                                    leftMargin=0.5*inch, rightMargin=0.5*inch,
+                                    topMargin=0.5*inch, bottomMargin=0.5*inch)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            # Title
+            story.append(Paragraph("505 SAR Dogs Certification Matrix", styles['Title']))
+            story.append(Spacer(1, 12))
+            story.append(Paragraph(f"Generated: {datetime.now().strftime('%m/%d/%Y')}", styles['Normal']))
+            story.append(Spacer(1, 20))
+            
+            # Build table data
+            # First row: Member column + certification type columns with vertical text
+            header_row = ['Member']
+            for cert in cert_types:
+                # Format certification name (split if 3+ words) and create vertical text
+                formatted_name = format_cert_name(cert)
+                header_row.append(create_vertical_text(formatted_name, 0.7*inch, 1.5*inch))
+            table_data = [header_row]
+            
+            # Track status header rows for styling
+            status_header_rows = []
+            current_row = 1  # Start after column header row
+            
+            # Map status values to plural display labels
+            status_labels = {
+                'Member': 'Members',
+                'Candidate': 'Candidates',
+                'Affiliate': 'Affiliates',
+                'Pre-Candidate': 'Pre-Candidates'
+            }
+            
+            # Group members by status
+            members_by_status = {}
+            for member in members:
+                status = member.get('member_status', 'Member')
+                if status not in members_by_status:
+                    members_by_status[status] = []
+                members_by_status[status].append(member)
+            
+            # Add rows for each status group
+            for status in ['Member', 'Candidate', 'Affiliate', 'Pre-Candidate']:
+                if status not in members_by_status or not members_by_status[status]:
+                    continue
+                
+                # Add status header row
+                table_data.append([status_labels[status]] + [''] * len(cert_types))
+                status_header_rows.append(current_row)
+                current_row += 1
+                
+                # Add member rows
+                for member in members_by_status[status]:
+                    member_name = f"{member.get('last_name', '')}, {member.get('first_name', '')}"
+                    certs = member.get('certifications', {})
+                    
+                    # Build row with member name and cert dates
+                    row = [member_name]
+                    for cert_type in cert_types:
+                        cert_date = certs.get(cert_type, '')
+                        # Show just the date if present, empty if not
+                        row.append(cert_date if cert_date else '')
+                    
+                    table_data.append(row)
+                    current_row += 1
+            
+            # Calculate column widths
+            # Member name column wider, cert columns narrower
+            col_widths = [2*inch] + [0.7*inch] * len(cert_types)
+            
+            # Create table with repeatRows to repeat header on page breaks
+            table = Table(table_data, colWidths=col_widths, repeatRows=1, 
+                         rowHeights=[1.5*inch] + [None] * (len(table_data) - 1))
+            
+            # Build table style
+            table_style = [
+                # Column header row styling
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (0, 0), colors.white),  # Member column text in white
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, 0), 'BOTTOM'),
+                ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (0, 0), 8),
+                ('TOPPADDING', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                
+                # Grid for entire table
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                
+                # Data rows styling
+                ('ALIGN', (0, 1), (0, -1), 'LEFT'),  # Member names left-aligned
+                ('ALIGN', (1, 1), (-1, -1), 'CENTER'),  # Dates centered
+                ('FONTSIZE', (0, 1), (-1, -1), 7),
+                ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
+            ]
+            
+            # Alternate row colors for data rows (not status headers)
+            data_rows_start = 1
+            data_rows_end = len(table_data) - 1
+            for row_num in range(data_rows_start, data_rows_end + 1):
+                if row_num not in status_header_rows:
+                    if (row_num - data_rows_start) % 2 == 0:
+                        table_style.append(('BACKGROUND', (0, row_num), (-1, row_num), colors.beige))
+            
+            # Add styling for status header rows
+            for row in status_header_rows:
+                table_style.extend([
+                    ('SPAN', (0, row), (-1, row)),  # Span across all columns
+                    ('BACKGROUND', (0, row), (-1, row), colors.lightgrey),
+                    ('FONTNAME', (0, row), (-1, row), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, row), (-1, row), 9),
+                    ('ALIGN', (0, row), (-1, row), 'CENTER'),
+                    ('VALIGN', (0, row), (-1, row), 'MIDDLE'),
+                    ('TOPPADDING', (0, row), (-1, row), 6),
+                    ('BOTTOMPADDING', (0, row), (-1, row), 6),
+                ])
+            
+            # Apply table style
+            table.setStyle(TableStyle(table_style))
+            
+            # Add story element to the document
+            story.append(table)
+            
+            # Build the PDF
+            doc.build(story)
+            
+            # Open with system default PDF viewer
+            if sys.platform == 'win32':
+                os.startfile(pdf_path)
+            elif sys.platform == 'darwin':  # macOS
+                subprocess.run(['open', pdf_path])
+            else:  # Linux
+                subprocess.run(['xdg-open', pdf_path])
+            
+        except ImportError as e:
+            messagebox.showerror("Missing Library", 
+                                f"Required library not installed: {e}\n\n"
+                                "Please install reportlab: pip install reportlab")
+        except Exception as e:
+            messagebox.showerror("PDF Error", f"Error generating PDF: {e}")
+
+        
     def _on_member_selected(self, event):
         """Handle member selection in treeview.
         
@@ -3415,9 +3703,9 @@ class TrainingTrackerApp:
                 response = messagebox.askyesnocancel(
                     "Session Type Changed",
                     f"You changed the session type to '{session_type}'.\n\n"
-                    "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Yes - Update the existing session\n"
-                    "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ No - Create a new session with this type\n"
-                    "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Cancel - Revert to previous type"
+                    "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Yes - Update the existing session\n"
+                    "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ No - Create a new session with this type\n"
+                    "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Cancel - Revert to previous type"
                 )
                 
                 if response is True:  # Yes - Update existing
@@ -3899,9 +4187,9 @@ class TrainingTrackerApp:
         # Confirm the modification
         changes = []
         if new_date != original_date:
-            changes.append(f"Date: {original_date} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ {new_date}")
+            changes.append(f"Date: {original_date} ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ {new_date}")
         if new_location != original_location:
-            changes.append(f"Location: {original_location} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ {new_location}")
+            changes.append(f"Location: {original_location} ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ {new_location}")
         
         change_text = "\n".join(changes)
         
@@ -4203,7 +4491,7 @@ def main():
         pass  # If config can't be loaded, splash will center on screen
     
     # Show splash screen centered over saved main window position
-    splash = SplashScreen(root, version="1.0.5-alpha",
+    splash = SplashScreen(root, version="1.0.6-alpha",
                           app_title="Attendance Tracker", 
                           github_url="github.com/agelders2021/attendance-tracker",
                           main_window_geometry=saved_geometry)
