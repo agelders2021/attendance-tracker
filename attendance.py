@@ -3325,12 +3325,14 @@ class TrainingTrackerApp:
             story.append(Spacer(1, 20))
             
             # Build table data
-            # First row: Member column + certification type columns with vertical text
+            # First row: Member column + certification type columns with vertical text + Mission Eligible
             header_row = ['Member']
             for cert in cert_types:
                 # Format certification name (split if 3+ words) and create vertical text
                 formatted_name = format_cert_name(cert)
                 header_row.append(create_vertical_text(formatted_name, 0.7*inch, 1.5*inch))
+            # Add Mission Eligible column
+            header_row.append(create_vertical_text(['Mission', 'Eligible'], 0.7*inch, 1.5*inch))
             table_data = [header_row]
             
             # Track status header rows for styling
@@ -3358,8 +3360,8 @@ class TrainingTrackerApp:
                 if status not in members_by_status or not members_by_status[status]:
                     continue
                 
-                # Add status header row
-                table_data.append([status_labels[status]] + [''] * len(cert_types))
+                # Add status header row (include extra column for Mission Eligible)
+                table_data.append([status_labels[status]] + [''] * (len(cert_types) + 1))
                 status_header_rows.append(current_row)
                 current_row += 1
                 
@@ -3375,12 +3377,16 @@ class TrainingTrackerApp:
                         # Show just the date if present, empty if not
                         row.append(cert_date if cert_date else '')
                     
+                    # Add Mission Eligible column
+                    mission_eligible = member.get('mission_eligible', False)
+                    row.append('Yes' if mission_eligible else 'No')
+                    
                     table_data.append(row)
                     current_row += 1
             
             # Calculate column widths
-            # Member name column wider, cert columns narrower
-            col_widths = [2*inch] + [0.7*inch] * len(cert_types)
+            # Member name column wider, cert columns and Mission Eligible narrower
+            col_widths = [2*inch] + [0.7*inch] * (len(cert_types) + 1)
             
             # Create table with repeatRows to repeat header on page breaks
             table = Table(table_data, colWidths=col_widths, repeatRows=1, 
@@ -4491,7 +4497,7 @@ def main():
         pass  # If config can't be loaded, splash will center on screen
     
     # Show splash screen centered over saved main window position
-    splash = SplashScreen(root, version="1.0.6-alpha",
+    splash = SplashScreen(root, version="1.0.7-alpha",
                           app_title="Attendance Tracker", 
                           github_url="github.com/agelders2021/attendance-tracker",
                           main_window_geometry=saved_geometry)
