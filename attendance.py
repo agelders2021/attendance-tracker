@@ -486,7 +486,7 @@ class TrainingTrackerApp:
             print(f"Error generating Excel: {e}")
             
     def _send_monthly_emails_if_needed(self):
-        """Send monthly attendance emails if it's a new month."""
+        """Send monthly attendance emails if it's a new month, with user confirmation."""
         current_month = datetime.now().strftime("%Y-%m")
         last_email_month = self.config.last_email_month
         
@@ -498,9 +498,23 @@ class TrainingTrackerApp:
         # ===END DEBUG===
         
         if current_month != last_email_month:
-            self._send_attendance_emails_to_all()
-            self.config.last_email_month = current_month
-            self.config.save()
+            # Ask user before sending
+            response = messagebox.askyesno(
+                "Monthly Attendance Emails",
+                f"It's a new month ({current_month}).\n\n"
+                "Would you like to send monthly attendance emails to all members?\n\n"
+                "Click 'Yes' to send emails now.\n"
+                "Click 'No' to skip (you can send them later from the Review Attendance dialog)."
+            )
+            
+            if response:
+                # Try to send emails - only update last_email_month if successful
+                if self._send_attendance_emails_to_all():
+                    self.config.last_email_month = current_month
+                    self.config.save()
+                # If send failed, don't update last_email_month so user is prompted again
+            # If response is False (No), don't update last_email_month
+            # so the user will be prompted again next time
             
     def _show_attendance_review_dialog(self, members: list):
         """Show a dialog to select members and date range for PDF generation.
@@ -656,6 +670,19 @@ class TrainingTrackerApp:
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(fill=tk.X, padx=10, pady=10)
         
+        def get_selected_members():
+            """Helper to get currently selected members from listbox."""
+            selection = listbox.curselection()
+            if not selection:
+                return []
+            selected = []
+            for idx in selection:
+                display_name = listbox.get(idx)
+                member = member_map.get(display_name)
+                if member:
+                    selected.append(member)
+            return selected
+        
         def on_execute():
             # Validate date range
             start_str = start_date_var.get().strip()
@@ -691,18 +718,10 @@ class TrainingTrackerApp:
                 return
             
             # Validate member selection
-            selection = listbox.curselection()
-            if not selection:
+            selected_members = get_selected_members()
+            if not selected_members:
                 messagebox.showwarning("No Selection", "Please select at least one member.")
                 return
-            
-            # Get selected members
-            selected_members = []
-            for idx in selection:
-                display_name = listbox.get(idx)
-                member = member_map.get(display_name)
-                if member:
-                    selected_members.append(member)
             
             dialog.destroy()
             
@@ -712,8 +731,40 @@ class TrainingTrackerApp:
         def on_cancel():
             dialog.destroy()
         
+        def on_email_selected():
+            # Validate member selection
+            selected_members = get_selected_members()
+            if not selected_members:
+                messagebox.showwarning("No Selection", "Please select at least one member to email.")
+                return
+            
+            # Filter to only members with email addresses
+            members_with_email = [m for m in selected_members if m.get('email', '').strip()]
+            if not members_with_email:
+                messagebox.showwarning("No Email Addresses", 
+                                       "None of the selected members have email addresses.")
+                return
+            
+            # Confirm before sending
+            member_names = [f"{m.get('first_name', '')} {m.get('last_name', '')}" for m in members_with_email]
+            if len(member_names) > 5:
+                names_display = "\n".join(member_names[:5]) + f"\n... and {len(member_names) - 5} more"
+            else:
+                names_display = "\n".join(member_names)
+            
+            if not messagebox.askyesno("Confirm Email",
+                                       f"Send attendance emails to {len(members_with_email)} member(s)?\n\n"
+                                       f"{names_display}"):
+                return
+            
+            dialog.destroy()
+            
+            # Send emails to selected members
+            self._send_attendance_emails_to_selected(members_with_email,debug_mode=False)
+        
         ttk.Button(btn_frame, text="Execute", command=on_execute).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Email Selected", command=on_email_selected).pack(side=tk.LEFT, padx=5)
         
     def _generate_pdf_for_date_range(self, selected_members: list, start_date: datetime, end_date: datetime):
         """Generate PDF for the selected members within the specified date range.
@@ -1042,8 +1093,12 @@ class TrainingTrackerApp:
             print(f"Error generating PDF preview: {e}")
             messagebox.showerror("PDF Error", f"Error generating PDF: {e}")
             
-    def _send_attendance_emails_to_all(self):
-        """Send attendance PDF emails to all members with email addresses."""
+    def _send_attendance_emails_to_all(self) -> bool:
+        """Send attendance PDF emails to all members with email addresses.
+        
+        Returns:
+            True if emails were sent successfully, False otherwise
+        """
         try:
             from reportlab.lib.pagesizes import letter
             from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -1067,8 +1122,10 @@ class TrainingTrackerApp:
             smtp_encryption = self.config.smtp_encryption
             
             if not sender_email or not sender_password:
-                print("Email not configured - skipping email send. Set sender_email and sender_password in config.")
-                return
+                messagebox.showerror("Email Not Configured", 
+                                    "Email settings are not configured.\n\n"
+                                    "Please set Sender Email and Password in the Setup tab.")
+                return False
             
             members = self.db.get_all_members()
             
@@ -1105,14 +1162,11 @@ class TrainingTrackerApp:
                 except ValueError:
                     continue
             
-            # DEBUG: Print session filtering results
-            # print(f"DEBUG: Email - Total sessions: {len(all_sessions)}, Last 6mo: {len(sessions_6mo)}, Last 3mo: {len(sessions_3mo)}")
-            # if sessions_6mo:
-            #     print(f"DEBUG: Email - First 6mo session: {sessions_6mo[0]}")
-            
             if not sessions_6mo:
-                # DEBUG: print("DEBUG: Email - No sessions in last 6 months for email")
-                return
+                messagebox.showinfo("No Sessions", 
+                                   "No sessions found in the last 6 months.\n"
+                                   "No emails will be sent.")
+                return False
                 
             # Count total qualifying training sessions in last 6 months
             # NOTE: get_all_sessions renames session_type->type
@@ -1121,68 +1175,62 @@ class TrainingTrackerApp:
             total_mission_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Mission')
             total_team_meeting_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Team Meeting')
             total_other_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Other')
-            # DEBUG: print(f"DEBUG: Email - Total qualifying training sessions in 6mo period: {total_qualifying_sessions}")
-            
-            # ===DEBUG=== Generate PDF preview and send emails
-            # print("DEBUG: Email - Generating PDFs and sending emails")
             
             # Connect to SMTP server once for all emails
-            # DEBUG: print(f"DEBUG: Email - Connecting to SMTP server: {smtp_server}:{smtp_port}")
-            # DEBUG: print(f"DEBUG: Email - Encryption type: {smtp_encryption}")
-            # DEBUG: print(f"DEBUG: Email - Username: {smtp_username}")
-            # DEBUG: print(f"DEBUG: Email - Sender: {sender_email}")
-            
             server = None
             try:
                 if smtp_encryption == "SSL":
-                    # DEBUG: print("DEBUG: Email - Using SSL connection")
                     context = ssl.create_default_context()
                     server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=context)
                 else:
-                    # DEBUG: print("DEBUG: Email - Using plain SMTP connection")
                     server = smtplib.SMTP(smtp_server, smtp_port)
-                    # DEBUG: server.set_debuglevel(1)  # Enable SMTP debug output
                     
                     if smtp_encryption == "TLS":
-                        # DEBUG: print("DEBUG: Email - Starting TLS")
                         server.starttls()
-                        # DEBUG: print(f"DEBUG: Email - STARTTLS result: {tls_result}")
                     elif smtp_encryption == "STARTTLS":
-                        # DEBUG: print("DEBUG: Email - Starting STARTTLS")
                         server.starttls()
-                        # DEBUG: print(f"DEBUG: Email - STARTTLS result: {tls_result}")
                         
-                # DEBUG: print("DEBUG: Email - Attempting login...")
                 server.login(smtp_username, sender_password)
-                # DEBUG: print(f"DEBUG: Email - Login result: {login_result}")
                 
             except smtplib.SMTPAuthenticationError as e:
-                # DEBUG: print(f"DEBUG: Email - Authentication failed: code={e.smtp_code}, msg={e.smtp_error}")
+                error_msg = str(e.smtp_error) if hasattr(e, 'smtp_error') else str(e)
+                messagebox.showerror("Email Authentication Failed", 
+                                    f"Failed to authenticate with email server.\n\n"
+                                    f"Please check your username and password in Setup tab.\n\n"
+                                    f"Error: {error_msg}")
                 if server:
-                    server.quit()
-                return
+                    try:
+                        server.quit()
+                    except:
+                        pass
+                return False
             except smtplib.SMTPException as e:
-                # DEBUG: print(f"DEBUG: Email - SMTP error: {type(e).__name__}: {e}")
-                # if hasattr(e, 'smtp_code'):
-                #     print(f"DEBUG: Email - SMTP code: {e.smtp_code}")
-                # if hasattr(e, 'smtp_error'):
-                #     print(f"DEBUG: Email - SMTP error msg: {e.smtp_error}")
+                messagebox.showerror("Email Server Error", 
+                                    f"Failed to connect to email server.\n\n"
+                                    f"Server: {smtp_server}:{smtp_port}\n"
+                                    f"Encryption: {smtp_encryption}\n\n"
+                                    f"Error: {e}")
                 if server:
                     try:
                         server.quit()
                     except:
                         pass
-                return
+                return False
             except Exception as e:
-                # DEBUG: print(f"DEBUG: Email - Connection error: {type(e).__name__}: {e}")
+                messagebox.showerror("Email Connection Error", 
+                                    f"Failed to connect to email server.\n\n"
+                                    f"Server: {smtp_server}:{smtp_port}\n\n"
+                                    f"Error: {type(e).__name__}: {e}")
                 if server:
                     try:
                         server.quit()
                     except:
                         pass
-                return
+                return False
             
             emails_sent = 0
+            emails_failed = []
+            
             for member in members:
                 email = member.get('email', '').strip()
                 if not email:
@@ -1190,7 +1238,6 @@ class TrainingTrackerApp:
                     
                 member_id = member.get('id')
                 member_name = f"{member.get('first_name', '')} {member.get('last_name', '')}"
-                # DEBUG: print(f"DEBUG: Email - Processing member: {member_name} <{email}>")
                 
                 # Generate PDF for this member
                 # Pass table sessions for table, 6mo sessions for counts, and months_to_review
@@ -1237,49 +1284,296 @@ class TrainingTrackerApp:
                         msg.attach(part)
                         
                         # Send email
-                        # DEBUG: print(f"DEBUG: Email - Sending email to {email}...")
                         server.sendmail(sender_email, email, msg.as_string())
-                        # DEBUG: print(f"DEBUG: Email - Send result: {send_result}")
                         emails_sent += 1
-                        # DEBUG: print(f"DEBUG: Email - Successfully sent to {email}")
                         
                     except smtplib.SMTPRecipientsRefused as e:
-                        # DEBUG: print(f"DEBUG: Email - Recipients refused for {email}: {e.recipients}")
-                        pass
+                        emails_failed.append(f"{member_name}: Recipient refused")
                     except smtplib.SMTPException as e:
-                        # DEBUG: print(f"DEBUG: Email - SMTP error sending to {email}: {type(e).__name__}: {e}")
-                        # if hasattr(e, 'smtp_code'):
-                        #     print(f"DEBUG: Email - SMTP code: {e.smtp_code}")
-                        pass
+                        emails_failed.append(f"{member_name}: {str(e)}")
                     except Exception as e:
-                        # DEBUG: print(f"DEBUG: Email - Error sending to {email}: {type(e).__name__}: {e}")
-                        pass
+                        emails_failed.append(f"{member_name}: {str(e)}")
                     
                     # Clean up temp file
                     try:
                         os.remove(pdf_path)
-                        # DEBUG: print(f"DEBUG: Email - Cleaned up temp file: {pdf_path}")
-                    except Exception as e:
-                        # DEBUG: print(f"DEBUG: Email - Could not remove temp file: {e}")
+                    except:
                         pass
-                # DEBUG: else:
-                #     print(f"DEBUG: Email - PDF generation failed for {member_name}")
+                else:
+                    emails_failed.append(f"{member_name}: PDF generation failed")
             
             # Close SMTP connection
             try:
                 server.quit()
-                # DEBUG: print("DEBUG: Email - SMTP connection closed")
-            except Exception as e:
-                # DEBUG: print(f"DEBUG: Email - Error closing SMTP: {e}")
+            except:
                 pass
-                
-            # DEBUG: print(f"DEBUG: Email - Total emails sent: {emails_sent}")
-            # ===END DEBUG===
+            
+            # Show results
+            if emails_failed:
+                failed_text = "\n".join(emails_failed[:10])
+                if len(emails_failed) > 10:
+                    failed_text += f"\n... and {len(emails_failed) - 10} more"
+                messagebox.showwarning("Monthly Email Results",
+                                      f"Emails sent: {emails_sent}\n"
+                                      f"Emails failed: {len(emails_failed)}\n\n"
+                                      f"Failed:\n{failed_text}")
+                return emails_sent > 0  # Return True if at least some were sent
+            else:
+                messagebox.showinfo("Monthly Emails Sent",
+                                   f"Successfully sent {emails_sent} attendance email(s).")
+                return True
                         
         except ImportError as e:
-            print(f"Required library not installed for email: {e}")
+            messagebox.showerror("Missing Library", f"Required library not installed for email: {e}")
+            return False
         except Exception as e:
-            print(f"Error sending emails: {e}")
+            messagebox.showerror("Email Error", f"Error sending emails: {e}")
+            return False
+            
+    def _send_attendance_emails_to_selected(self, selected_members: list, debug_mode: bool = True):
+        """Send attendance PDF emails to selected members.
+        
+        Args:
+            selected_members: List of member dictionaries to email
+            debug_mode: If True, send all emails to sender_email instead of actual recipients
+        """
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib import colors
+            import smtplib
+            import ssl
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.base import MIMEBase
+            from email.mime.text import MIMEText
+            from email import encoders
+            import tempfile
+            
+            # Check for email configuration
+            sender_email = self.config.sender_email
+            sender_password = self.config.sender_password
+            smtp_server = self.config.smtp_server
+            smtp_port = self.config.smtp_port
+            smtp_username = self.config.smtp_username or sender_email
+            smtp_encryption = self.config.smtp_encryption
+            
+            if not sender_email or not sender_password:
+                messagebox.showerror("Email Not Configured", 
+                                    "Please configure email settings in the Setup tab first.\n\n"
+                                    "Required: Sender Email and Password")
+                return
+            
+            # Get all members for sender name lookup
+            all_members = self.db.get_all_members()
+            
+            # Look up the sender's member name based on their email
+            sender_member_name = "Secretary"
+            for m in all_members:
+                if m.get('email', '').strip().lower() == sender_email.strip().lower():
+                    sender_member_name = f"{m.get('first_name', '')} {m.get('last_name', '')}".strip()
+                    break
+                elif m.get('alternate_email', '').strip().lower() == sender_email.strip().lower():
+                    sender_member_name = f"{m.get('first_name', '')} {m.get('last_name', '')}".strip()
+                    break
+            
+            # Get the configured number of months to review for table
+            months_to_review = self.config.pdf_months_to_review
+            
+            # Get sessions from last 6 months (for weekend attendance count)
+            cutoff_6mo = datetime.now() - timedelta(days=180)
+            cutoff_table = datetime.now() - timedelta(days=months_to_review * 30) if months_to_review > 0 else None
+            all_sessions = self.db.get_all_sessions()
+            
+            # Filter sessions to last 6 months and table period
+            sessions_6mo = []
+            sessions_table = []
+            for session in all_sessions:
+                try:
+                    session_date = datetime.strptime(session.get('date', ''), "%m/%d/%Y")
+                    if session_date >= cutoff_6mo:
+                        sessions_6mo.append(session)
+                    if cutoff_table and session_date >= cutoff_table:
+                        sessions_table.append(session)
+                except ValueError:
+                    continue
+            
+            if not sessions_6mo:
+                messagebox.showinfo("No Sessions", "No sessions found in the last 6 months.")
+                return
+                
+            # Count total sessions by type
+            total_qualifying_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Weekend Training')
+            total_optional_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Weeknight Training')
+            total_mission_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Mission')
+            total_team_meeting_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Team Meeting')
+            total_other_sessions = sum(1 for s in sessions_6mo if s.get('type') == 'Other')
+            
+            # Show debug mode warning
+            if debug_mode:
+                messagebox.showinfo("Debug Mode Active",
+                                   f"DEBUG MODE: All emails will be sent to:\n{sender_email}\n\n"
+                                   "The actual recipient addresses will be shown in the email subject.")
+            
+            # Connect to SMTP server
+            server = None
+            try:
+                if smtp_encryption == "SSL":
+                    context = ssl.create_default_context()
+                    server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=context)
+                else:
+                    server = smtplib.SMTP(smtp_server, smtp_port)
+                    if smtp_encryption in ("TLS", "STARTTLS"):
+                        server.starttls()
+                        
+                server.login(smtp_username, sender_password)
+                
+            except smtplib.SMTPAuthenticationError as e:
+                messagebox.showerror("Authentication Failed", 
+                                    f"SMTP authentication failed.\n\n"
+                                    f"Please check your username and password in Setup tab.")
+                if server:
+                    try:
+                        server.quit()
+                    except:
+                        pass
+                return
+            except smtplib.SMTPException as e:
+                messagebox.showerror("SMTP Error", f"Failed to connect to email server:\n{e}")
+                if server:
+                    try:
+                        server.quit()
+                    except:
+                        pass
+                return
+            except Exception as e:
+                messagebox.showerror("Connection Error", f"Failed to connect to email server:\n{e}")
+                if server:
+                    try:
+                        server.quit()
+                    except:
+                        pass
+                return
+            
+            emails_sent = 0
+            emails_failed = []
+            
+            for member in selected_members:
+                original_email = member.get('email', '').strip()
+                if not original_email:
+                    continue
+                
+                # In debug mode, send to sender_email instead
+                target_email = sender_email if debug_mode else original_email
+                    
+                member_id = member.get('id')
+                member_name = f"{member.get('first_name', '')} {member.get('last_name', '')}"
+                
+                # Generate PDF for this member
+                pdf_path = self._generate_member_attendance_pdf(
+                    member, sessions_table, sessions_6mo, 
+                    total_qualifying_sessions, total_optional_sessions,
+                    total_mission_sessions, total_team_meeting_sessions, total_other_sessions,
+                    months_to_review
+                )
+                
+                if pdf_path:
+                    try:
+                        # Create email message
+                        msg = MIMEMultipart()
+                        msg['From'] = sender_email
+                        msg['To'] = target_email
+                        
+                        # In debug mode, include original recipient in subject
+                        if debug_mode:
+                            msg['Subject'] = f"[DEBUG - Originally to: {original_email}] 505 SAR Dogs Attendance Record"
+                        else:
+                            msg['Subject'] = "505 SAR Dogs Attendance Record"
+                        
+                        # Email body
+                        month_text = "month" if months_to_review == 1 else "months"
+                        if months_to_review > 0:
+                            table_info = f"for the last {months_to_review} {month_text}"
+                        else:
+                            table_info = "(summary only)"
+                        
+                        body = (
+                            f"To: {member_name},\n"
+                            f"Re: Training\n\n"
+                            f"Please find attached your training attendance record {table_info}.\n\n"
+                            f"Contact me (Secretary) by replying to this email if you think there is an error.\n\n"
+                            f"Thank you,\n"
+                            f"{sender_member_name}"
+                        )
+                        
+                        # In debug mode, add a note at the top
+                        if debug_mode:
+                            body = (
+                                f"*** DEBUG MODE ***\n"
+                                f"This email would have been sent to: {original_email}\n"
+                                f"*** END DEBUG ***\n\n"
+                            ) + body
+                        
+                        msg.attach(MIMEText(body, 'plain'))
+                        
+                        # Attach PDF
+                        with open(pdf_path, 'rb') as attachment:
+                            part = MIMEBase('application', 'octet-stream')
+                            part.set_payload(attachment.read())
+                        encoders.encode_base64(part)
+                        part.add_header(
+                            'Content-Disposition',
+                            f'attachment; filename="Attendance_Record_{member.get("last_name", "")}.pdf"'
+                        )
+                        msg.attach(part)
+                        
+                        # Send email
+                        server.sendmail(sender_email, target_email, msg.as_string())
+                        emails_sent += 1
+                        
+                    except smtplib.SMTPRecipientsRefused as e:
+                        emails_failed.append(f"{member_name}: Recipient refused")
+                    except smtplib.SMTPException as e:
+                        emails_failed.append(f"{member_name}: {str(e)}")
+                    except Exception as e:
+                        emails_failed.append(f"{member_name}: {str(e)}")
+                    
+                    # Clean up temp file
+                    try:
+                        os.remove(pdf_path)
+                    except:
+                        pass
+                else:
+                    emails_failed.append(f"{member_name}: PDF generation failed")
+            
+            # Close SMTP connection
+            try:
+                server.quit()
+            except:
+                pass
+            
+            # Show results
+            if emails_failed:
+                failed_text = "\n".join(emails_failed[:10])
+                if len(emails_failed) > 10:
+                    failed_text += f"\n... and {len(emails_failed) - 10} more"
+                messagebox.showwarning("Email Results",
+                                      f"Emails sent: {emails_sent}\n"
+                                      f"Emails failed: {len(emails_failed)}\n\n"
+                                      f"Failed:\n{failed_text}")
+            else:
+                if debug_mode:
+                    messagebox.showinfo("Emails Sent (Debug Mode)",
+                                       f"Successfully sent {emails_sent} email(s) to {sender_email}\n\n"
+                                       f"(Debug mode - emails redirected to sender)")
+                else:
+                    messagebox.showinfo("Emails Sent",
+                                       f"Successfully sent {emails_sent} email(s).")
+                        
+        except ImportError as e:
+            messagebox.showerror("Missing Library", f"Required library not installed: {e}")
+        except Exception as e:
+            messagebox.showerror("Email Error", f"Error sending emails: {e}")
             
     def _generate_member_attendance_pdf(self, member: dict, sessions_table: list, sessions_6mo: list, 
                                           total_qualifying: int, total_optional: int,
@@ -3211,7 +3505,7 @@ class TrainingTrackerApp:
                 - Split to keep logical groupings (e.g., 'Crime Scene' together)
                 
                 Lines are returned in reading order (top line first when rotated).
-                With 90° counterclockwise rotation, text reads bottom-to-top.
+                With 90Â° counterclockwise rotation, text reads bottom-to-top.
                 """
                 # Replace hyphens with spaces to count them as separate words
                 words_for_counting = text.replace('-', ' ').split()
@@ -3293,15 +3587,15 @@ class TrainingTrackerApp:
                         s.fillColor = colors.white
                         g.add(s)
                 
-                # Apply transformation: rotate 90° and position in center of cell
+                # Apply transformation: rotate 90Â° and position in center of cell
                 # The transform method applies a transformation matrix
-                # For 90° counterclockwise rotation: [cos(90), sin(90), -sin(90), cos(90), tx, ty]
+                # For 90Â° counterclockwise rotation: [cos(90), sin(90), -sin(90), cos(90), tx, ty]
                 # = [0, 1, -1, 0, tx, ty]
                 import math
                 # Position at center of cell
                 tx = width / 2
                 ty = height / 2
-                # Apply rotation (90° counterclockwise) and translation
+                # Apply rotation (90Â° counterclockwise) and translation
                 g.transform = (0, 1, -1, 0, tx, ty)
                 
                 d.add(g)
@@ -3709,9 +4003,9 @@ class TrainingTrackerApp:
                 response = messagebox.askyesnocancel(
                     "Session Type Changed",
                     f"You changed the session type to '{session_type}'.\n\n"
-                    "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Yes - Update the existing session\n"
-                    "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ No - Create a new session with this type\n"
-                    "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Cancel - Revert to previous type"
+                    "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Yes - Update the existing session\n"
+                    "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ No - Create a new session with this type\n"
+                    "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Cancel - Revert to previous type"
                 )
                 
                 if response is True:  # Yes - Update existing
@@ -4193,9 +4487,9 @@ class TrainingTrackerApp:
         # Confirm the modification
         changes = []
         if new_date != original_date:
-            changes.append(f"Date: {original_date} ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ {new_date}")
+            changes.append(f"Date: {original_date} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ {new_date}")
         if new_location != original_location:
-            changes.append(f"Location: {original_location} ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ {new_location}")
+            changes.append(f"Location: {original_location} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ {new_location}")
         
         change_text = "\n".join(changes)
         
@@ -4497,7 +4791,7 @@ def main():
         pass  # If config can't be loaded, splash will center on screen
     
     # Show splash screen centered over saved main window position
-    splash = SplashScreen(root, version="1.0.7-alpha",
+    splash = SplashScreen(root, version="1.0.8-alpha",
                           app_title="Attendance Tracker", 
                           github_url="github.com/agelders2021/attendance-tracker",
                           main_window_geometry=saved_geometry)
