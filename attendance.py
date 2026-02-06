@@ -87,12 +87,100 @@ class TrainingTrackerApp:
         # Track which years have had attendance data modified during this session
         self._modified_years: set = set()
         
+        # Create scrollable outer container
+        self._create_scrollable_container()
+        
         # Create the main notebook (tab container)
         self._create_notebook()
         
+    def _create_scrollable_container(self):
+        """Create the scrollable outer container for the entire application."""
+        # Create outer frame to hold canvas and scrollbar
+        self.outer_frame = ttk.Frame(self.root)
+        self.outer_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Create canvas
+        self.main_canvas = tk.Canvas(self.outer_frame, highlightthickness=0)
+        self.main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Create vertical scrollbar
+        self.main_scrollbar = ttk.Scrollbar(
+            self.outer_frame, 
+            orient=tk.VERTICAL, 
+            command=self.main_canvas.yview
+        )
+        self.main_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Configure canvas to use scrollbar
+        self.main_canvas.configure(yscrollcommand=self.main_scrollbar.set)
+        
+        # Create inner frame to hold all content
+        self.scrollable_frame = ttk.Frame(self.main_canvas)
+        
+        # Create window in canvas for the scrollable frame
+        self.canvas_window = self.main_canvas.create_window(
+            (0, 0), 
+            window=self.scrollable_frame, 
+            anchor=tk.NW
+        )
+        
+        # Bind events for scrolling and resizing
+        self.scrollable_frame.bind("<Configure>", self._on_frame_configure)
+        self.main_canvas.bind("<Configure>", self._on_canvas_configure)
+        
+        # Bind mouse wheel to scroll anywhere in the window
+        self._bind_mousewheel()
+        
+    def _on_frame_configure(self, event):
+        """Update scroll region when the inner frame size changes."""
+        self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
+        
+    def _on_canvas_configure(self, event):
+        """Update the inner frame width when canvas is resized."""
+        # Make the inner frame at least as wide as the canvas
+        canvas_width = event.width
+        self.main_canvas.itemconfig(self.canvas_window, width=canvas_width)
+        
+    def _bind_mousewheel(self):
+        """Bind mouse wheel events for scrolling."""
+        # Bind to root window so scrolling works anywhere
+        self.root.bind("<MouseWheel>", self._on_mousewheel)  # Windows/Mac
+        self.root.bind("<Button-4>", self._on_mousewheel)    # Linux scroll up
+        self.root.bind("<Button-5>", self._on_mousewheel)    # Linux scroll down
+        
+    def _unbind_mousewheel(self):
+        """Unbind mouse wheel events."""
+        self.root.unbind("<MouseWheel>")
+        self.root.unbind("<Button-4>")
+        self.root.unbind("<Button-5>")
+        
+    def _on_mousewheel(self, event):
+        """Handle mouse wheel scrolling."""
+        # Check if scrolling is needed (content taller than canvas)
+        canvas_height = self.main_canvas.winfo_height()
+        scroll_region = self.main_canvas.bbox("all")
+        if scroll_region is None:
+            return
+        content_height = scroll_region[3] - scroll_region[1]
+        
+        if content_height <= canvas_height:
+            return  # No scrolling needed
+            
+        # Determine scroll direction and amount
+        if event.num == 4:  # Linux scroll up
+            self.main_canvas.yview_scroll(-1, "units")
+        elif event.num == 5:  # Linux scroll down
+            self.main_canvas.yview_scroll(1, "units")
+        else:  # Windows/Mac
+            # event.delta is positive for scroll up, negative for scroll down
+            # Normalize the delta (Windows uses 120, Mac uses smaller values)
+            delta = -1 if event.delta > 0 else 1
+            self.main_canvas.yview_scroll(delta, "units")
+        
     def _create_notebook(self):
         """Create the main notebook with tabs."""
-        self.notebook = ttk.Notebook(self.root)
+        # Pack notebook into the scrollable frame instead of root
+        self.notebook = ttk.Notebook(self.scrollable_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Create tab frames
@@ -267,6 +355,9 @@ class TrainingTrackerApp:
         
         # Close database connection
         self.db.close()
+        
+        # Unbind mousewheel events before destroying
+        self._unbind_mousewheel()
         
         # Destroy window
         self.root.destroy()
@@ -3505,7 +3596,7 @@ class TrainingTrackerApp:
                 - Split to keep logical groupings (e.g., 'Crime Scene' together)
                 
                 Lines are returned in reading order (top line first when rotated).
-                With 90Â° counterclockwise rotation, text reads bottom-to-top.
+                With 90Ã‚Â° counterclockwise rotation, text reads bottom-to-top.
                 """
                 # Replace hyphens with spaces to count them as separate words
                 words_for_counting = text.replace('-', ' ').split()
@@ -3587,15 +3678,15 @@ class TrainingTrackerApp:
                         s.fillColor = colors.white
                         g.add(s)
                 
-                # Apply transformation: rotate 90Â° and position in center of cell
+                # Apply transformation: rotate 90Ã‚Â° and position in center of cell
                 # The transform method applies a transformation matrix
-                # For 90Â° counterclockwise rotation: [cos(90), sin(90), -sin(90), cos(90), tx, ty]
+                # For 90Ã‚Â° counterclockwise rotation: [cos(90), sin(90), -sin(90), cos(90), tx, ty]
                 # = [0, 1, -1, 0, tx, ty]
                 import math
                 # Position at center of cell
                 tx = width / 2
                 ty = height / 2
-                # Apply rotation (90Â° counterclockwise) and translation
+                # Apply rotation (90Ã‚Â° counterclockwise) and translation
                 g.transform = (0, 1, -1, 0, tx, ty)
                 
                 d.add(g)
@@ -4003,9 +4094,9 @@ class TrainingTrackerApp:
                 response = messagebox.askyesnocancel(
                     "Session Type Changed",
                     f"You changed the session type to '{session_type}'.\n\n"
-                    "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Yes - Update the existing session\n"
-                    "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ No - Create a new session with this type\n"
-                    "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Cancel - Revert to previous type"
+                    "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Yes - Update the existing session\n"
+                    "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ No - Create a new session with this type\n"
+                    "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Cancel - Revert to previous type"
                 )
                 
                 if response is True:  # Yes - Update existing
@@ -4487,9 +4578,9 @@ class TrainingTrackerApp:
         # Confirm the modification
         changes = []
         if new_date != original_date:
-            changes.append(f"Date: {original_date} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ {new_date}")
+            changes.append(f"Date: {original_date} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ {new_date}")
         if new_location != original_location:
-            changes.append(f"Location: {original_location} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ {new_location}")
+            changes.append(f"Location: {original_location} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ {new_location}")
         
         change_text = "\n".join(changes)
         
@@ -4791,7 +4882,7 @@ def main():
         pass  # If config can't be loaded, splash will center on screen
     
     # Show splash screen centered over saved main window position
-    splash = SplashScreen(root, version="1.0.8-alpha",
+    splash = SplashScreen(root, version="1.0.9-alpha",
                           app_title="Attendance Tracker", 
                           github_url="github.com/agelders2021/attendance-tracker",
                           main_window_geometry=saved_geometry)
