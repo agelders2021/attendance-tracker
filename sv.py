@@ -28,6 +28,7 @@ widgets to the database. Import this module where needed.
 
 import tkinter as tk
 from tkinter import ttk
+import ui_support
 
 
 class AppVariables:
@@ -68,15 +69,11 @@ class AppVariables:
         self.ham_callsign = tk.StringVar()
         self.mission_eligible = tk.BooleanVar(value=False)
         
-        # Certification Dates (Treeview data)
-        self.pack_check_date = tk.StringVar()
-        self.online_base_medical_date = tk.StringVar()
-        self.crime_scene_preservation_date = tk.StringVar()
-        self.blood_borne_pathogens_date = tk.StringVar()
-        self.nm_sar_field_certification_date = tk.StringVar()
-        self.fitness_hike_1_date = tk.StringVar()
-        self.fitness_hike_2_date = tk.StringVar()
-        self.fitness_hike_3_date = tk.StringVar()
+        # Certification Dates (Treeview data) — keyed by certification name
+        self.cert_dates: dict = {
+            name: tk.StringVar()
+            for name in ui_support.load_certification_names()
+        }
         
         # Currently selected member ID for editing
         self.selected_member_id = tk.IntVar(value=-1)
@@ -132,14 +129,8 @@ class AppVariables:
         self.emergency_contact_phone.set("")
         self.ham_callsign.set("")
         self.mission_eligible.set(False)
-        self.pack_check_date.set("")
-        self.online_base_medical_date.set("")
-        self.crime_scene_preservation_date.set("")
-        self.blood_borne_pathogens_date.set("")
-        self.nm_sar_field_certification_date.set("")
-        self.fitness_hike_1_date.set("")
-        self.fitness_hike_2_date.set("")
-        self.fitness_hike_3_date.set("")
+        for var in self.cert_dates.values():
+            var.set("")
         self.selected_member_id.set(-1)
         
     def clear_training_session(self):
@@ -152,35 +143,20 @@ class AppVariables:
         
     def get_certification_dates_dict(self) -> dict:
         """Return certification dates as a dictionary.
-        
+
         Returns:
             Dictionary with certification names as keys and dates as values
         """
-        return {
-            "Pack Check": self.pack_check_date.get(),
-            "On-line Base Medical": self.online_base_medical_date.get(),
-            "Crime Scene Preservation": self.crime_scene_preservation_date.get(),
-            "Blood-borne Pathogens": self.blood_borne_pathogens_date.get(),
-            "NM SAR Field Certification": self.nm_sar_field_certification_date.get(),
-            "Fitness Hike 1": self.fitness_hike_1_date.get(),
-            "Fitness Hike 2": self.fitness_hike_2_date.get(),
-            "Fitness Hike 3": self.fitness_hike_3_date.get(),
-        }
-        
+        return {name: var.get() for name, var in self.cert_dates.items()}
+
     def set_certification_dates_from_dict(self, dates: dict):
         """Set certification dates from a dictionary.
-        
+
         Args:
             dates: Dictionary with certification names as keys and dates as values
         """
-        self.pack_check_date.set(dates.get("Pack Check", ""))
-        self.online_base_medical_date.set(dates.get("On-line Base Medical", ""))
-        self.crime_scene_preservation_date.set(dates.get("Crime Scene Preservation", ""))
-        self.blood_borne_pathogens_date.set(dates.get("Blood-borne Pathogens", ""))
-        self.nm_sar_field_certification_date.set(dates.get("NM SAR Field Certification", ""))
-        self.fitness_hike_1_date.set(dates.get("Fitness Hike 1", ""))
-        self.fitness_hike_2_date.set(dates.get("Fitness Hike 2", ""))
-        self.fitness_hike_3_date.set(dates.get("Fitness Hike 3", ""))
+        for name, var in self.cert_dates.items():
+            var.set(dates.get(name, ""))
 
 
 # Global instance - will be initialized when the app starts

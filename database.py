@@ -30,6 +30,7 @@ import sqlite3
 import os
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Tuple, Any
+import ui_support
 
 
 # Date format used throughout the application
@@ -114,24 +115,16 @@ class DatabaseManager:
                     sort_order INTEGER DEFAULT 0
                 )
             ''')
-            
-            # Insert default certification types
-            default_certs = [
-                "Pack Check",
-                "On-line Base Medical",
-                "Crime Scene Preservation",
-                "Blood-borne Pathogens",
-                "NM SAR Field Certification",
-                "Fitness Hike 1",
-                "Fitness Hike 2",
-                "Fitness Hike 3",
-            ]
-            for i, cert in enumerate(default_certs):
-                cursor.execute(
-                    "INSERT OR IGNORE INTO certification_types (certification_name, sort_order) VALUES (?, ?)",
-                    (cert, i)
-                )
-            self.connection.commit()
+
+        # Always sync certification_types from certifications.json
+        json_certs = ui_support.load_certification_names()
+        cursor.execute("DELETE FROM certification_types")
+        for i, cert in enumerate(json_certs):
+            cursor.execute(
+                "INSERT INTO certification_types (certification_name, sort_order) VALUES (?, ?)",
+                (cert, i)
+            )
+        self.connection.commit()
         
         # Check if attendance table has updated_at column, add if missing
         cursor.execute("PRAGMA table_info(attendance)")
@@ -306,17 +299,7 @@ class DatabaseManager:
             cursor.execute("INSERT OR IGNORE INTO users (username) VALUES (?)", ("default",))
             
             # Insert default certification types
-            default_certs = [
-                "Pack Check",
-                "On-line Base Medical",
-                "Crime Scene Preservation",
-                "Blood-borne Pathogens",
-                "NM SAR Field Certification",
-                "Fitness Hike 1",
-                "Fitness Hike 2",
-                "Fitness Hike 3",
-            ]
-            for i, cert in enumerate(default_certs):
+            for i, cert in enumerate(ui_support.load_certification_names()):
                 cursor.execute(
                     "INSERT OR IGNORE INTO certification_types (certification_name, sort_order) VALUES (?, ?)",
                     (cert, i)
@@ -1223,17 +1206,7 @@ class DatabaseManager:
             
         except sqlite3.Error as e:
             print(f"Error getting certification types: {e}")
-            # Return default list if table doesn't exist
-            return [
-                "Pack Check",
-                "On-line Base Medical",
-                "Crime Scene Preservation",
-                "Blood-borne Pathogens",
-                "NM SAR Field Certification",
-                "Fitness Hike 1",
-                "Fitness Hike 2",
-                "Fitness Hike 3",
-            ]
+            return ui_support.load_certification_names()
             
     def add_certification_type(self, cert_name: str) -> bool:
         """Add a certification type.

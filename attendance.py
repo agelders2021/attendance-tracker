@@ -2892,19 +2892,8 @@ class TrainingTrackerApp:
         member_id = self.vars.selected_member_id.get()
         
         # Update the StringVar for this certification
-        cert_var_map = {
-            "Pack Check": self.vars.pack_check_date,
-            "On-line Base Medical": self.vars.online_base_medical_date,
-            "Crime Scene Preservation": self.vars.crime_scene_preservation_date,
-            "Blood-borne Pathogens": self.vars.blood_borne_pathogens_date,
-            "NM SAR Field Certification": self.vars.nm_sar_field_certification_date,
-            "Fitness Hike 1": self.vars.fitness_hike_1_date,
-            "Fitness Hike 2": self.vars.fitness_hike_2_date,
-            "Fitness Hike 3": self.vars.fitness_hike_3_date,
-        }
-        
-        if cert_name in cert_var_map:
-            cert_var_map[cert_name].set(date_value)
+        if cert_name in self.vars.cert_dates:
+            self.vars.cert_dates[cert_name].set(date_value)
         
         if member_id > 0 and self.db.database_exists():
             # Update the certification in the database

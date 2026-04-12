@@ -27,6 +27,9 @@ code that doesn't directly relate to tkinter widget creation.
 """
 
 import re
+import json
+import os
+import sys
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, List, Dict
 import tkinter as tk
@@ -181,40 +184,61 @@ def validate_email(email: str) -> Tuple[bool, str]:
 # Treeview Helper Functions
 # ============================================================
 
+def _app_dir() -> str:
+    """Return the directory containing the app, whether running as .py or .exe."""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+_CERTIFICATIONS_JSON = os.path.join(_app_dir(), "certifications.json")
+
+_DEFAULT_CERTIFICATIONS = [
+    "Pack Check",
+    "On-line Base Medical",
+    "Crime Scene Preservation",
+    "WFA",
+    "WFR",
+    "License",
+    "NM SAR Field Certification",
+    "Fitness Hike 1",
+    "Fitness Hike 2",
+    "Fitness Hike 3",
+]
+
+
+def load_certification_names() -> List[str]:
+    """Load certification names from certifications.json, falling back to defaults.
+
+    Returns:
+        List of certification names
+    """
+    try:
+        with open(_CERTIFICATIONS_JSON, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        names = data.get("certifications", [])
+        if names:
+            return names
+    except (OSError, json.JSONDecodeError):
+        pass
+    return list(_DEFAULT_CERTIFICATIONS)
+
+
 def create_certification_treeview_data() -> List[Dict]:
     """Create the initial data structure for the certification treeview.
-    
+
     Returns:
         List of dictionaries with certification row data
     """
-    return [
-        {"name": "Pack Check", "date": ""},
-        {"name": "On-line Base Medical", "date": ""},
-        {"name": "Crime Scene Preservation", "date": ""},
-        {"name": "Blood-borne Pathogens", "date": ""},
-        {"name": "NM SAR Field Certification", "date": ""},
-        {"name": "Fitness Hike 1", "date": ""},
-        {"name": "Fitness Hike 2", "date": ""},
-        {"name": "Fitness Hike 3", "date": ""},
-    ]
+    return [{"name": name, "date": ""} for name in load_certification_names()]
 
 
 def get_certification_row_names() -> List[str]:
     """Get the list of certification row names.
-    
+
     Returns:
         List of certification names
     """
-    return [
-        "Pack Check",
-        "On-line Base Medical",
-        "Crime Scene Preservation",
-        "Blood-borne Pathogens",
-        "NM SAR Field Certification",
-        "Fitness Hike 1",
-        "Fitness Hike 2",
-        "Fitness Hike 3",
-    ]
+    return load_certification_names()
 
 
 # ============================================================
