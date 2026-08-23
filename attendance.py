@@ -2762,7 +2762,12 @@ class TrainingTrackerApp:
             cert_names = self.db.get_certification_types()
         else:
             cert_names = ui_support.get_certification_row_names()
-            
+
+        # Keep vars.cert_dates in sync so newly added cert types get a StringVar
+        for name in cert_names:
+            if name not in self.vars.cert_dates:
+                self.vars.cert_dates[name] = tk.StringVar()
+
         # Add rows with alternating colors
         for i, name in enumerate(cert_names):
             tag = 'oddrow' if i % 2 else 'evenrow'
